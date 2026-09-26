@@ -1,0 +1,62 @@
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### IntelliJ IDEA ###
+.idea/modules.xml
+.idea/jarRepositories.xml
+.idea/compiler.xml
+.idea/libraries/
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### Kotlin ###
+.kotlin
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store
+
+### 分发产物 ###
+# MSI 约 50 MB、便携 ZIP 约 56 MB，超过部分代码托管平台的单文件上限（如 Gitee 50 MB）。
+# 安装包一律作为 Release / 发行版附件分发，不要提交进仓库。
+*.msi
+*.zip
+
+### 运行时数据 ###
+# 调试时数据可能落在工程目录内（或有人把便携版解压进来），这些含令牌与账号，不要提交。
+data/
+authlib-injector.jar
+auth.json
+accounts.txt
+gamedirs.txt
+
+### 调试临时文件 ###
+*.log
