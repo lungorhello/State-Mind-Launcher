@@ -1,4 +1,5 @@
 # State Mind Launcher
+###### This README is written by AI 由AI编写的README
 
 Windows 上的 Minecraft 启动器。Kotlin + JavaFX 编写，界面全部由代码构建（不使用 FXML）。
 
