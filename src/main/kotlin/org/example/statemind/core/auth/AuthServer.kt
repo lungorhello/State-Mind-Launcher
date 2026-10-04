@@ -4,39 +4,27 @@ import org.example.statemind.core.MiniJson
 import java.net.URI
 
 /**
- * 一个认证服务器（Yggdrasil 服务器）——第三方账号都挂在某个服务器上，比如 LittleSkin。
+ * 一个认证服务器（Yggdrasil 服务器）：第三方账号挂在某个服务器上，比如 LittleSkin。
+ * 用户通常只输 `littleskin.cn` 这样的短地址，由 [locate] 解析成真正的 API 根。
  *
- * [apiRoot] 是服务器 API 的根地址，所有请求都从它拼出来（`authserver/authenticate` 等）。
- * 用户通常只输 `littleskin.cn` 这样的短地址，所以要靠 [locate] 把它解析成真正的 API 根：
- *  1. 补上 `https://`（官方规范要求：**不允许**降级成明文 http）；
- *  2. 发一次 GET，看响应头里有没有 `X-Authlib-Injector-API-Location`——有就按它跳（ALI 机制），
- *     没有就把当前地址当成 API 根；
- *  3. 顺便把服务器 metadata 读回来（服务器名、是否支持用户名登录），给界面显示用。
- *
- * @param apiRoot        规范化之后的 API 根地址，**一定以 `/` 结尾**
- * @param name           服务器名（metadata 里的 `meta.serverName`，取不到就退化成域名）
- * @param nonEmailLogin  服务器是否允许用「非邮箱」的账号标识登录（LittleSkin 允许）
+ * @param apiRoot 规范化后的 API 根地址，**一定以 `/` 结尾**
  */
 data class AuthServer(
     val apiRoot: String,
     val name: String,
     val nonEmailLogin: Boolean,
 ) {
-    /** 是不是明文 http 的服务器——是的话界面要提示「账号密码会明文传输」。 */
+    /** 明文 http 的服务器：界面要提示账号密码会明文传输。 */
     val insecure: Boolean get() = apiRoot.startsWith("http://")
 
     companion object {
 
-        /** 预置服务器：LittleSkin（国内最常用的皮肤站，注册只要邮箱）。 */
+        /** 预置服务器：LittleSkin。 */
         const val LITTLESKIN = "https://littleskin.cn/api/yggdrasil/"
 
         private const val ALI_HEADER = "X-Authlib-Injector-API-Location"
 
-        /**
-         * 把用户输入的地址解析成一个可用的服务器。
-         *
-         * @throws AuthException 地址不合法、连不上，或者响应根本不是 Yggdrasil 的 metadata
-         */
+        /** @throws AuthException 地址不合法、连不上，或响应不是 Yggdrasil 的 metadata */
         fun locate(input: String): AuthServer {
             val typed = normalizeInput(input)
             val first = try {
@@ -69,7 +57,7 @@ data class AuthServer(
             return parseMetadata(root, body)
         }
 
-        /** 缺协议补 https；两边空白和末尾多余的斜杠都清掉。 */
+        /** 缺协议补 https —— 官方规范不允许降级成明文 http。 */
         private fun normalizeInput(raw: String): String {
             val text = raw.trim().trimEnd('/')
             if (text.isEmpty()) throw AuthException(AuthError.UNREACHABLE, "请先填认证服务器的地址。")
@@ -78,7 +66,6 @@ data class AuthServer(
 
         private fun withTrailingSlash(url: String): String = if (url.endsWith("/")) url else "$url/"
 
-        /** 把 ALI 头里可能是相对路径的值，转成绝对地址。 */
         private fun resolveAgainst(base: String, ali: String): String =
             runCatching { URI(base).resolve(ali.trim()).toString() }.getOrDefault(ali.trim())
 

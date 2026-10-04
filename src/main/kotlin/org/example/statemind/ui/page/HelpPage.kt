@@ -6,10 +6,7 @@ import javafx.scene.control.Label
 import javafx.scene.layout.StackPane
 import org.example.statemind.ui.Page
 
-/**
- * 探索。现阶段放帮助 / 使用说明 / 常见问题，以后还会塞进一些零散小功能
- * （离线 Wiki 查询、崩溃分析入口、小工具集），所以叫"探索"而不是"帮助"。
- */
+/** 现阶段只放帮助 / 常见问题，以后会塞零散小功能（离线 Wiki、崩溃分析、小工具），故叫「探索」。 */
 class HelpPage : Page {
 
     override val id = "help"

@@ -4,15 +4,7 @@ import java.io.File
 import java.util.Properties
 import java.util.UUID
 
-/**
- * 启动器的轻量偏好存储。
- *
- * 存在**数据根目录**下的 `settings.properties` —— 和账号文件同一个目录（都在 .minecraft 之外），
- * 用标准的 properties 格式，可以直接用记事本改。只放「开关」这类零散设置，
- * 账号相关的数据仍然归 [AccountStore] 管。
- *
- * 数据根目录见 [GameDir.appRoot]：安装版 = `%APPDATA%\StateMind`，便携版 = `<解压目录>\data`。
- */
+/** 数据根目录下的 `settings.properties`；用标准 properties 格式，方便直接用记事本改。 */
 object Prefs {
 
     private val file: File by lazy {
@@ -27,20 +19,16 @@ object Prefs {
         }
     }
 
-    /** 删除账号前是否还要弹确认框。用户在确认框里勾了「不再提醒」就变 false。 */
+    /** 删账号前是否弹确认框；用户勾过「不再提醒」后为 false。 */
     var confirmDelete: Boolean
         get() = readFlag(KEY_CONFIRM_DELETE, true)
         set(value) = writeFlag(KEY_CONFIRM_DELETE, value)
 
-    /**
-     * Java 是否自动选择（全局）。默认开 —— 新手不用管，老手可以在「设置 · 启动」里关掉自己指定。
-     * 读取与写入都收在 [JavaStore] 里，这里只负责落盘。
-     */
+    /** Java 自动选择（默认开）；读写都收在 [JavaStore]。 */
     var autoJava: Boolean
         get() = readFlag(KEY_AUTO_JAVA, true)
         set(value) = writeFlag(KEY_AUTO_JAVA, value)
 
-    /** 手动指定的 Java 目录（全局）。空 = 还没选过。 */
     var javaHome: String
         get() = props.getProperty(KEY_JAVA_HOME).orEmpty()
         set(value) {
@@ -48,11 +36,7 @@ object Prefs {
             save()
         }
 
-    /**
-     * Yggdrasil 的 clientToken —— 代表「这个启动器实例」的随机标识，
-     * 生成一次后长期复用：**同一份** clientToken 发出去的令牌才能被 refresh。
-     * 第三方账号的令牌本体存在 auth.json（AuthStore），这里只放这一个标识。
-     */
+    /** 这个启动器实例的随机标识，生成一次长期复用：同一份 clientToken 发出去的令牌才能 refresh。 */
     val yggdrasilClientToken: String
         get() {
             props.getProperty(KEY_YGGDRASIL_CLIENT)?.let { if (it.isNotBlank()) return it }
@@ -62,10 +46,7 @@ object Prefs {
             return token
         }
 
-    /** 偏好文件位置，给需要展示路径的地方用。 */
     val location: File get() = file
-
-    // ---------- 内部 ----------
 
     private fun readFlag(key: String, defaultValue: Boolean): Boolean =
         props.getProperty(key)?.toBooleanStrictOrNull() ?: defaultValue

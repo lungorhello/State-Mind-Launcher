@@ -4,23 +4,14 @@ import org.example.statemind.core.auth.AuthStore
 import java.io.File
 
 /**
- * 账号清单的本地存储。
+ * 账号清单的本地存储，在数据根目录下的 `accounts.txt`。
  *
- * 放在**数据根目录**下的 `accounts.txt` —— 与游戏数据同一个父目录、但**不在 .minecraft 里面**，
- * 免得将来「清理游戏数据」之类的操作把账号连带清掉。
- * （数据根目录见 [GameDir.appRoot]：安装版 = `%APPDATA%\StateMind`，便携版 = `<解压目录>\data`。）
- *
- * 存档格式刻意做得极简、可以直接用记事本改：
- *
- *     # State Mind Launcher · 账号（每行 type<TAB>id<TAB>名字）
- *     @current=1694999999999
- *     OFFLINE	1694999999999	lungor
- *
- * 首次访问时自动从磁盘读一次，之后增删改都会立刻写回。
+ * 刻意放在游戏数据之外：将来「清理游戏数据」之类的操作不会把账号连带清掉。
+ * 首次访问时自动读盘，之后增删改立刻写回。
  */
 object AccountStore {
 
-    /** 玩家名长度限制，跟 Minecraft 的账号名规则一致。 */
+    /** 跟 Minecraft 账号名规则一致。 */
     const val MIN_NAME_LEN = 3
     const val MAX_NAME_LEN = 16
 
@@ -36,41 +27,33 @@ object AccountStore {
     private var currentId: String? = null
     private var loaded = false
 
-    /** 全部账号，按添加顺序。 */
+    /** 按添加顺序。 */
     val accounts: List<Account>
         get() {
             ensureLoaded()
             return list
         }
 
-    /** 当前账号。没明确选过就取第一个；一个都没有则返回 null。 */
+    /** 没明确选过就取第一个；一个都没有则返回 null。 */
     val current: Account?
         get() {
             ensureLoaded()
             return list.firstOrNull { it.id == currentId } ?: list.firstOrNull()
         }
 
-    /** 存档文件位置，给需要展示路径的地方用。 */
     val location: File get() = file
 
-    // ---------- 名字校验 ----------
-
-    /** 玩家名校验结果。 */
     sealed interface NameCheck {
-        /** 合法，可以直接用。 */
         data object Ok : NameCheck
 
-        /** 不合法，不允许添加。 */
         data class Invalid(val reason: String) : NameCheck
 
-        /** 能添加，但有风险，需要用户确认后再继续。 */
         data class Risky(val reason: String) : NameCheck
     }
 
     /**
-     * 校验一个离线玩家名。
-     *  - 空 / 长度不在 3–16 / 与已有账号重名 → [NameCheck.Invalid]，直接拦；
-     *  - 含 `A-Z a-z 0-9 _` 以外的字符（如中文）→ [NameCheck.Risky]，弹警告但允许继续。
+     * 空 / 超长 / 重名 → [NameCheck.Invalid]，直接拦；
+     * 含 `A-Z a-z 0-9 _` 以外的字符（如中文）→ [NameCheck.Risky]，警告但放行。
      */
     fun checkOfflineName(rawName: String): NameCheck {
         ensureLoaded()
@@ -94,12 +77,7 @@ object AccountStore {
         return NameCheck.Ok
     }
 
-    // ---------- 增删改 ----------
-
-    /**
-     * 添加一个离线账号。调用前应先过 [checkOfflineName]；这里只留最后一道空名/重名保护。
-     * @return 添加成功的账号；名字不合规时返回 null。
-     */
+    /** 调用前应先过 [checkOfflineName]；这里只做空名和重名的兜底，不合规则返回 null。 */
     fun addOffline(rawName: String): Account? {
         ensureLoaded()
         val name = sanitize(rawName)
@@ -113,10 +91,9 @@ object AccountStore {
     }
 
     /**
-     * 添加一个第三方（皮肤站）账号。名字取角色名；若跟已有账号重名就补上服务器名
-     * ——同一个角色名出现在不同皮肤站是常事，不区分的话列表里认不出来。
+     * 添加一个第三方账号，名字取角色名；重名就补上服务器名（同一角色名出现在不同皮肤站是常事）。
      *
-     * 这里**不碰令牌**：只有 [AuthStore] 存得下 accessToken / 服务器地址那套字段。
+     * 这里**不碰令牌**：accessToken、服务器地址那些字段只有 [AuthStore] 存得下。
      */
     fun addThirdParty(playerName: String, serverName: String): Account {
         ensureLoaded()
@@ -134,7 +111,7 @@ object AccountStore {
         return acc
     }
 
-    /** 删除账号。删掉的正好是当前账号时，自动顶上下一个；第三方账号的令牌一并清掉。 */
+    /** 删掉的正好是当前账号时自动顶上后一个；第三方账号的令牌一并清掉。 */
     fun remove(id: String) {
         ensureLoaded()
         val index = list.indexOfFirst { it.id == id }
@@ -145,7 +122,7 @@ object AccountStore {
         AuthStore.remove(id)   // 别在 auth.json 里留孤儿凭证
     }
 
-    /** 把某个账号设为「当前」（顶部横幅显示的那个）。 */
+    /** 设为当前账号（顶部横幅显示的那个）。 */
     fun setCurrent(id: String) {
         ensureLoaded()
         if (currentId == id || list.none { it.id == id }) return
@@ -153,7 +130,6 @@ object AccountStore {
         save()
     }
 
-    /** 重新从磁盘读一次（覆盖内存里的）。 */
     fun reload() {
         loaded = true
         list.clear()
@@ -183,8 +159,6 @@ object AccountStore {
         // 存档里记的当前账号已经不在了（被手改过），退回第一个
         if (currentId != null && list.none { it.id == currentId }) currentId = list.firstOrNull()?.id
     }
-
-    // ---------- 内部 ----------
 
     /** 去掉会破坏存档格式的空白与制表符。 */
     private fun sanitize(raw: String): String =

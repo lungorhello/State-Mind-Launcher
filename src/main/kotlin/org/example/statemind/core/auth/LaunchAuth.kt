@@ -5,40 +5,31 @@ import org.example.statemind.core.AccountType
 import org.example.statemind.core.Prefs
 
 /**
- * 启动前的「账号准备」——把「当前选中的账号」翻译成启动游戏要用的东西。
+ * 启动前的账号准备：把当前选中的账号翻译成启动游戏要用的东西。
  *
- * 三类账号的差别都在这里收口，[org.example.statemind.core.LaunchUtil] 只管拼命令行：
- *  - 离线：玩家名直接用账号名，UUID 由启动器按官方算法算；
- *  - 第三方：先校验令牌（过期就刷新，[AuthStore.ensureUsable]），再备好 authlib-injector，
- *    产出 `-javaagent` 三件套 + 角色 UUID，`user_type` 填 `mojang`（外置登录也走这套模板）；
- *  - 微软：还没实现，暂时按离线处理（界面上也还加不了这类账号）。
- *
- * 这个方法**会联网**（第三方账号），必须在后台线程调用。
+ * [prepare] **会联网**（第三方账号），必须在后台线程调用。
  */
 object LaunchAuth {
 
-    /** 给启动器用的一份凭证。 */
     data class Credentials(
         val playerName: String,
-        /** 角色 UUID（第三方账号用皮肤站给的）；null 表示按离线算法算。 */
+        /** 第三方账号用皮肤站给的；null 表示按离线算法算。 */
         val uuid: String? = null,
         val accessToken: String = "0",
         val userType: String = "legacy",
-        /** 额外的 JVM 参数（外置登录就是 `-javaagent` 那三条）。 */
         val extraJvmArgs: List<String> = emptyList(),
     )
 
     sealed interface Outcome {
-        /** 可以启动了。 */
         data class Ready(val credentials: Credentials) : Outcome
 
         /**
-         * 令牌彻底失效，刷新也救不回来 —— 得请用户**重新输一次密码**。
-         * 界面上由 `ui.ThirdPartySignIn.promptRelogin` 弹窗承接，登录成功后调用方重跑一遍 [prepare]。
+         * 令牌失效且刷不回来，得请用户重输密码 —— 界面上由 `ui.ThirdPartySignIn.promptRelogin`
+         * 承接，成功后调用方重跑 [prepare]。
          */
         data object NeedsRelogin : Outcome
 
-        /** 网络不通 / agent 下载失败 —— 附一句能直接给用户看的原因。 */
+        /** message 直接给用户看。 */
         data class Failed(val message: String) : Outcome
     }
 

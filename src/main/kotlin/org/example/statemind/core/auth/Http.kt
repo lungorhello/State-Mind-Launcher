@@ -11,22 +11,15 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.time.Duration
 
-/**
- * 认证用的最简 HTTP 封装。
- *
- * 用 JDK 自带的 [HttpClient]：跟随重定向（ALI 地址解析要靠它）、超时可控、不引依赖。
- * 这里只管发请求和收回响应，**不解释**任何业务错误——那是 [YggdrasilApi] 的事。
- */
+/** 认证用的最简 HTTP 封装，跟随重定向（ALI 地址解析要靠它）。 */
 internal object Http {
 
-    /** 一次响应：状态码 + 正文 + 最终地址（重定向之后）+ 响应头。 */
     class Response(
         val status: Int,
         val body: String,
         val uri: String,
         private val headers: Map<String, List<String>>,
     ) {
-        /** 按名字取响应头，大小写不敏感（ALI 头就是这个用法）。 */
         fun header(name: String): String? = headers.entries
             .firstOrNull { it.key.equals(name, ignoreCase = true) }
             ?.value?.firstOrNull()
@@ -57,10 +50,7 @@ internal object Http {
             .build())
 
     /**
-     * 下载二进制文件（authlib-injector.jar 走这里）。
-     *
-     * 先写 `.part` 再改名：中途断线不会留下半个文件骗过后面的完整性校验。
-     * 给了 [sha256] 就顺带核对，对不上直接抛异常。
+     * 下载二进制文件。先写 `.part` 再改名：中途断线不会留下半个文件骗过完整性校验。
      */
     fun download(url: String, target: File, sha256: String? = null, timeoutSeconds: Long = 120) {
         target.parentFile?.mkdirs()

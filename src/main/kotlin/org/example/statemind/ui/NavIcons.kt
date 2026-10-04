@@ -7,21 +7,16 @@ import javafx.scene.shape.SVGPath
 import javafx.scene.transform.Affine
 
 /**
- * 主导航的图标。
+ * 主导航图标：图形是从「游戏图标包 v1.4」的 SVG 里提出来的矢量路径（`d` + 各自的 viewBox），
+ * 用 [SVGPath] 画 —— 缩放不糊，填充色也能跟着选中态变。
  *
- * 图形不是图片文件，是从「游戏图标包 v1.4」的 SVG 里提出来的**矢量路径**（`d` + 各自的 viewBox），
- * 用 JavaFX 自带的 [SVGPath] 画。两个好处：缩放不糊；填充色能跟着选中态变
- * （原图本来就是 `currentColor`，正好一一对应）。
- *
- * 图标包的 viewBox 是**紧凑包围盒**，每个图标都不一样（如 `1.6 1.6 6.8 6.8`），
- * 所以画的时候得按它自己的 viewBox 缩放 + 平移 —— 见 [byPage]。
+ * 图标包的 viewBox 是紧凑包围盒、每个都不一样，所以画的时候要按各自的 viewBox 缩放平移。
  */
 internal object NavIcons {
 
-    /** 一个图标的原始数据。 */
     private class Data(val d: String, val x: Double, val y: Double, val w: Double, val h: Double)
 
-    /** 画好的图标：[node] 塞进按钮，[shape] 留着随选中态换色。 */
+    /** [shape] 留着随选中态换色。 */
     class Icon(val node: StackPane, val shape: SVGPath)
 
     /** home（界面.svg） */
@@ -48,10 +43,7 @@ internal object NavIcons {
         2.00, 2.00, 6.00, 6.00
     )
 
-    /**
-     * 取某个页面的图标。[size] 见方，[color] 是当前填充色。
-     * 返回 `null` 表示这个页面没配图标（按钮就退化成纯文字）。
-     */
+    /** 返回 null 表示这个页面没配图标（按钮退化成纯文字）。 */
     fun byPage(pageId: String, size: Double, color: Color): Icon? {
         val data = when (pageId) {
             "home" -> HOME
@@ -69,11 +61,9 @@ internal object NavIcons {
             transforms.setAll(Affine(s, 0.0, -data.x * s, 0.0, s, -data.y * s))
         }
 
-        // 必须套一层 Group —— 这里踩过一次坑：
-        // 上面的 Affine 已经把「包围盒偏移」补偿掉了，而 StackPane 居中子节点时**还会再补偿一次**
-        // （按子节点 layoutBounds 的 minX/minY 挪），两边叠加 → 图标整体右下偏出去
-        // `viewBox 起点 × 缩放比`（实测首页那个正好偏 +5px，就是 1.6 × 2.94）。
-        // Group 的 layoutBounds 是**含子节点变换**的，套上它之后补偿只发生一次，图标正落在正中。
+        // 必须套一层 Group：上面的 Affine 已经补偿掉「包围盒偏移」，而 StackPane 居中子节点时
+        // 会再补偿一次（按子节点 layoutBounds 的 minX/minY），两边叠加 → 图标整体偏出去。
+        // Group 的 layoutBounds 含子节点变换，套上它之后补偿只发生一次。
         val box = StackPane(Group(path)).apply {
             minWidth = size
             prefWidth = size
