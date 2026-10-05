@@ -22,6 +22,10 @@ object JavaStore {
     var scanned: Boolean = false
         private set
 
+    /** 游戏目录里装过版本没有 —— 自动选择算不出 Java 时靠它把「暂无实例」和「没有可用 Java」分开。 */
+    var hasInstance: Boolean = false
+        private set
+
     var auto: Boolean
         get() = Prefs.autoJava
         set(value) {
@@ -59,9 +63,11 @@ object JavaStore {
     fun refresh() {
         Thread {
             val found = runCatching { BackendUtil.getJavas() }.getOrDefault(emptyList())
+            val anyInstance = runCatching { hasAnyInstance() }.getOrDefault(false)
             Platform.runLater {
                 list.clear()
                 list.addAll(found)
+                hasInstance = anyInstance
                 scanned = true
                 // 手动选的那份不见了：退回第一个，免得下次启动直接失败
                 if (manualPath.isNotBlank() && list.none { it.path == manualPath }) {
@@ -75,13 +81,25 @@ object JavaStore {
         }.start()
     }
 
-    /** 最终用哪一份；null = 没得用，由调用方弹提示。 */
-    fun resolve(version: String?): JavaInfo? =
-        if (auto) pickFor(version) else manual
+    /**
+     * 任一游戏目录里有一份版本就算有实例。走和首页同一份扫描结果 ——
+     * 两处各自判一次的话，「有没有实例」会被判成两个答案。
+     */
+    private fun hasAnyInstance(): Boolean =
+        InstanceScan.scanAll(GameDirStore.all).any { it.versions.isNotEmpty() }
 
-    /** 版本读不出来（老 json 不写 javaVersion）时按「未知」处理。 */
-    fun pickFor(version: String?): JavaInfo? =
-        choose(list, version?.let { runCatching { LaunchUtil.requiredJavaMajor(it) }.getOrNull() })
+    /** 最终用哪一份；null = 没得用，由调用方弹提示。 */
+    fun resolve(target: LaunchTarget?): JavaInfo? =
+        if (auto) pickFor(target) else manual
+
+    /**
+     * 按目标版本要求的 Java 大版本挑一份。
+     * 还没选版本（[target] 为 null）或版本读不出来（老 json 不写 javaVersion）时按「未知」处理。
+     */
+    fun pickFor(target: LaunchTarget?): JavaInfo? =
+        choose(list, target?.let { t ->
+            runCatching { LaunchUtil.requiredJavaMajor(t.versionId, t.versionRoot) }.getOrNull()
+        })
 
     /**
      * 纯挑选逻辑（不碰磁盘、不碰界面，可单独验证）。

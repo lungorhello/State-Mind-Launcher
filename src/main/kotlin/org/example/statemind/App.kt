@@ -18,10 +18,15 @@ import org.example.statemind.core.auth.LaunchAuth
 import org.example.statemind.core.JavaStore
 import org.example.statemind.core.LaunchUtil
 import org.example.statemind.core.GameDir
+import org.example.statemind.core.GameDirStore
+import org.example.statemind.core.InstanceScan
+import org.example.statemind.core.LaunchSelection
+import org.example.statemind.core.LaunchTarget
 import org.example.statemind.ui.Dialogs
 import org.example.statemind.ui.NavBar
 import org.example.statemind.ui.Page
 import org.example.statemind.ui.PageHost
+import org.example.statemind.ui.Theme
 import org.example.statemind.ui.ThirdPartySignIn
 import org.example.statemind.ui.page.DownloadPage
 import org.example.statemind.ui.page.HelpPage
@@ -49,15 +54,17 @@ class App : Application() {
         // 打开启动器即刻补全标准 .minecraft 骨架（无需先点启动），与 PCL 等启动器行为一致
         GameDir.ensure(BackendUtil.minecraftDir)
 
-        val scanning = "(扫描中…)"
-
-        // 游戏版本下拉：先用占位项，扫描在后台跑，不卡界面
-        val gameVersion = ComboBox<String>().apply {
-            items.add(scanning)
-            value = scanning
+        // 游戏版本下拉：先放个占位项，扫描在后台跑，不卡界面。
+        // 占位项是**列表里真实的一项**，不靠 promptText —— ComboBox 在没有选中值时不画提示文字
+        // （实测，0.2 起的老毛病），只有「选中项确实在 items 里」这条路稳。占位项的 target 为 null。
+        val gameVersion = ComboBox<Choice>().apply {
+            items.add(Choice(null, SCANNING))
+            value = items[0]
             isDisable = true
             maxWidth = Double.MAX_VALUE
         }
+        // 选中的就是「要启动哪一个版本」—— 「设置 · 启动」要按它报出「将使用 Java x.y.z」
+        gameVersion.valueProperty().addListener { _, _, now -> LaunchSelection.current = now?.target }
 
         val status = Label("").apply {
             style = "-fx-font-size: 12px; -fx-text-fill: #666666;"
@@ -70,7 +77,7 @@ class App : Application() {
 
         val launchBtn = Button("启动游戏").apply {
             isDisable = true   // 扫描到版本后再放开
-            setOnAction { doLaunch(gameVersion.value, this) }
+            setOnAction { doLaunch(gameVersion.value?.target, this) }
         }
 
         // 启动表单。（Java 与玩家名都不在这里了：Java 在「设置 · 启动」，
@@ -117,33 +124,35 @@ class App : Application() {
         stage.minWidth = 660.0
         stage.minHeight = 560.0
 
-        stage.scene = Scene(StackPane(content, overlay), 900.0, 620.0)
+        // 强调色在场景根上覆盖一次，整棵树（下拉聚焦边框、开关、主按钮…）都跟着变紫。
+        // 别改回「给单个控件写样式」：那样只有被点到的那个控件是紫的，其余还是主题蓝。
+        val root = StackPane(content, overlay).apply { style = Theme.accentStyle }
+        stage.scene = Scene(root, 900.0, 620.0)
         stage.show()
 
         // 默认停在第一个页面（首页）
         pageHost.open(pages.first().id)
 
-        // 后台扫描本机已安装版本（getGameCores 要读一堆 json）。
-        // Java 的扫描同样慢，交给 JavaStore 自己跑后台线程 —— 它扫完会通知「设置 · 启动」页，
-        // 本文件不用再管那份列表。
+        // 后台扫描**所有游戏目录**里的版本（要读一堆 json）。Java 的扫描同样慢，交给 JavaStore
+        // 自己跑后台线程 —— 它扫完会通知「设置 · 启动」页，本文件不用再管那份列表。
         Thread {
-            val cores = runCatching { BackendUtil.getGameCores() }.getOrDefault(emptyList())
+            val dirs = runCatching { InstanceScan.scanAll(GameDirStore.all) }
+                .getOrDefault(emptyList())
+            val choices = choicesOf(dirs)
             JavaStore.refresh()
             Platform.runLater {
-                gameVersion.items.clear()
-                if (cores.isEmpty()) {
-                    gameVersion.items.add("（未检测到已安装版本）")
-                    gameVersion.value = gameVersion.items[0]
+                if (choices.isEmpty()) {
+                    gameVersion.items.setAll(Choice(null, NO_VERSION))
                     gameVersion.isDisable = true
                 } else {
-                    gameVersion.items.addAll(cores)
-                    gameVersion.value = cores.first()
+                    gameVersion.items.setAll(choices)
                     gameVersion.isDisable = false
                 }
+                gameVersion.value = gameVersion.items[0]
                 // Java 有没有不在这里判：真点启动时再解析，缺 Java 会弹窗说清楚原因
-                launchBtn.isDisable = cores.isEmpty()
+                launchBtn.isDisable = choices.isEmpty()
                 setStatus(
-                    if (cores.isEmpty()) "未检测到已安装的游戏版本，请先安装一个版本"
+                    if (choices.isEmpty()) "未检测到已安装的游戏版本，请先安装一个版本"
                     else "就绪"
                 )
             }
@@ -170,8 +179,8 @@ class App : Application() {
      *
      * 检查项（已有实例、Java 版本）也都用内置弹窗问，用回调串起来，不阻塞等待 —— 界面不会被弹窗卡住。
      */
-    private fun doLaunch(version: String?, button: Button) {
-        if (version.isNullOrBlank()) {
+    private fun doLaunch(target: LaunchTarget?, button: Button) {
+        if (target == null || target.versionId.isBlank()) {
             setStatus("请先选好游戏版本", autoClear = true)
             return
         }
@@ -188,7 +197,7 @@ class App : Application() {
 
         // 账号准备（第三方要联网校验令牌、备 authlib-injector）放后台跑，
         // 备好之后才继续 Java / 实例那些检查
-        prepareAccount(account, version, button)
+        prepareAccount(account, target, button)
     }
 
     /**
@@ -197,7 +206,7 @@ class App : Application() {
      *  - 第三方：校验令牌（过期就刷新）→ 备好 authlib-injector → 产出 `-javaagent` 三件套。
      * 会联网，所以整体跑在后台线程，回来再决定是继续启动还是弹窗拦下。
      */
-    private fun prepareAccount(account: Account, version: String, button: Button) {
+    private fun prepareAccount(account: Account, target: LaunchTarget, button: Button) {
         button.isDisable = true
         setStatus("准备账号…")
         Thread {
@@ -205,7 +214,7 @@ class App : Application() {
             Platform.runLater {
                 button.isDisable = false
                 when (outcome) {
-                    is LaunchAuth.Outcome.Ready -> continueLaunch(version, outcome.credentials, button)
+                    is LaunchAuth.Outcome.Ready -> continueLaunch(target, outcome.credentials, button)
 
                     LaunchAuth.Outcome.NeedsRelogin -> {
                         // 令牌救不回来了，就地弹一个「只问密码」的续登窗 ——
@@ -213,7 +222,7 @@ class App : Application() {
                         // 登录成功后重新跑一次账号准备：这时令牌是新的，会走到 Ready 接着启动。
                         setStatus("登录已失效，请重新登录", autoClear = true)
                         ThirdPartySignIn.promptRelogin(account) {
-                            prepareAccount(account, version, button)
+                            prepareAccount(account, target, button)
                         }
                     }
 
@@ -227,12 +236,12 @@ class App : Application() {
     }
 
     /** 账号备好了：接着检查 Java、已在跑的实例，再进入 Java 版本校验与启动。 */
-    private fun continueLaunch(version: String, credentials: LaunchAuth.Credentials, button: Button) {
-        val java = JavaStore.resolve(version)
+    private fun continueLaunch(target: LaunchTarget, credentials: LaunchAuth.Credentials, button: Button) {
+        val java = JavaStore.resolve(target)
         if (java == null) {
             Dialogs.error(
                 "没有可用的 Java",
-                "没找到能用来启动「$version」的 Java。\n\n" +
+                "没找到能用来启动「${target.versionId}」的 Java。\n\n" +
                         "请到「设置 · 启动」里指定一个 Java，或者先在本机安装 Java 再重开启动器。"
             )
             setStatus("没有可用的 Java，已取消启动", autoClear = true)
@@ -248,22 +257,22 @@ class App : Application() {
                         "再次启动会同时运行多个实例，占用更多内存与 CPU。",
                 kind = Dialogs.Kind.WARN,
                 confirmText = "继续启动"
-            ) { checkJavaThenStart(version, java, credentials, button) }
+            ) { checkJavaThenStart(target, java, credentials, button) }
             return
         }
-        checkJavaThenStart(version, java, credentials, button)
+        checkJavaThenStart(target, java, credentials, button)
     }
 
     /** Java 版本校验：低于最低要求直接拦，高于推荐值先确认一次。 */
     private fun checkJavaThenStart(
-        version: String,
+        target: LaunchTarget,
         java: JavaInfo,
         credentials: LaunchAuth.Credentials,
         button: Button
     ) {
-        val check = LaunchUtil.checkJava(version, java.version)
+        val check = LaunchUtil.checkJava(target.versionId, java.version, target.versionRoot)
         if (check == null) {
-            startGame(version, java, credentials, button)
+            startGame(target, java, credentials, button)
             return
         }
         if (check.blocked) {
@@ -279,12 +288,12 @@ class App : Application() {
             body = check.message,
             kind = Dialogs.Kind.WARN,
             confirmText = "仍要启动"
-        ) { startGame(version, java, credentials, button) }
+        ) { startGame(target, java, credentials, button) }
     }
 
     /** 真正开始启动。前面所有确认都过了之后才会走到这里。 */
     private fun startGame(
-        version: String,
+        target: LaunchTarget,
         java: JavaInfo,
         credentials: LaunchAuth.Credentials,
         button: Button
@@ -298,7 +307,9 @@ class App : Application() {
             try {
                 val process = LaunchUtil.launch(
                     LaunchUtil.Config(
-                        version = version,
+                        version = target.versionId,
+                        versionRoot = target.versionRoot,
+                        sharedRoot = target.sharedRoot,
                         javaHome = java.path,
                         playerName = credentials.playerName,
                         uuid = credentials.uuid,
@@ -384,6 +395,26 @@ class App : Application() {
         }
     }
 
+    /**
+     * 把扫描结果摊成下拉里的项。同一个版本 id 出现在多个目录里时**补上目录昵称**才分得清 ——
+     * 只有一个的时候不加，免得整列都拖着长尾巴。
+     */
+    private fun choicesOf(dirs: List<InstanceScan.Directory>): List<Choice> {
+        val flat = dirs.flatMap { d -> d.versions.map { d to it } }
+        val repeated = flat.groupingBy { it.second.id }.eachCount().filterValues { it > 1 }.keys
+        return flat.map { (d, v) ->
+            Choice(
+                target = LaunchTarget(v.id, d.gameDir, d.sharedRoot, d.sourceName),
+                label = if (v.id in repeated) "${v.id}　（${d.title}）" else v.id
+            )
+        }
+    }
+
+    /** 下拉里的一项。占位项的 [target] 为 null。 */
+    private data class Choice(val target: LaunchTarget?, val label: String) {
+        override fun toString(): String = label
+    }
+
     private fun fieldGroup(labelText: String, control: Control): VBox {
         return VBox(
             Label(labelText).apply {
@@ -396,6 +427,12 @@ class App : Application() {
     }
 
     private companion object {
+        /** 版本还没扫完时下拉里的占位文字。 */
+        const val SCANNING = "（扫描中…）"
+
+        /** 一个版本都没扫到时下拉里的文字。 */
+        const val NO_VERSION = "（未检测到已安装版本）"
+
         /** 末端状态在状态行停留多久后自动清空。 */
         const val STATUS_HOLD_MS = 6000L
 

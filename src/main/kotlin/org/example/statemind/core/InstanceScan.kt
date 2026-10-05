@@ -6,6 +6,8 @@ import java.io.File
  * 扫一个游戏目录里的「实例」：`versions/` 下每个带同名 json 的子目录算一个。只读，不写盘。
  *
  * 加载器靠 `libraries` 里的 maven group 认，比看文件夹名可靠 —— 文件夹名是用户自己起的。
+ *
+ * 界面上要的是「所有游戏目录里的所有版本」，那是 [scanAll]；[scan] 只管一个目录。
  */
 object InstanceScan {
 
@@ -30,6 +32,46 @@ object InstanceScan {
     ) {
         /** 卡片第二行。 */
         val description: String get() = "${loader.label} · $mcVersion"
+    }
+
+    /** 一个游戏目录（multi 系里一个实例算一个）扫出来的结果，界面按它分组。 */
+    data class Directory(
+        /** 目录昵称。 */
+        val sourceName: String,
+        /** multi 系实例名；单目录式为 null。 */
+        val instanceName: String?,
+        /** 记录里那条路径 —— 移除时按它找记录（multi 系的多个分组共用同一条）。 */
+        val rootPath: String,
+        /** 真正传给游戏的游戏目录。 */
+        val gameDir: File,
+        /** `libraries/` 与 `assets/` 所在目录：传统目录就是 [gameDir]，multi 系在目录根（多实例共享）。 */
+        val sharedRoot: File,
+        val type: GameDir.Type,
+        val versions: List<Version>
+    ) {
+        /** 分组标题。multi 系要带上实例名，才认得出是哪一个实例。 */
+        val title: String get() = if (instanceName == null) sourceName else "$sourceName · $instanceName"
+    }
+
+    /** 把一批目录记录摊平并扫描。传 [GameDirStore.all] 就是「界面上所有目录的所有版本」。 */
+    fun scanAll(entries: List<GameDirStore.Entry>): List<Directory> {
+        val out = ArrayList<Directory>()
+        for (entry in entries) {
+            for (r in GameDir.resolve(entry.root)) {
+                out.add(
+                    Directory(
+                        sourceName = entry.name,
+                        instanceName = r.instanceName,
+                        rootPath = entry.path,
+                        gameDir = r.gameDir,
+                        sharedRoot = r.sharedRoot,
+                        type = r.type,
+                        versions = if (r.gameDir.isDirectory) scan(r.gameDir) else emptyList()
+                    )
+                )
+            }
+        }
+        return out
     }
 
     /** 目录不存在、没有 `versions/`、一个版本都没有 → 返回空表。 */

@@ -6,16 +6,6 @@ object BackendUtil {
 
     val minecraftDir: File get() = GameDir.defaultLocation()
 
-    fun getGameCores(): List<String> {
-        val versionsDir = File(minecraftDir, "versions")
-        if (!versionsDir.isDirectory) return emptyList()
-        return versionsDir.listFiles { f -> f.isDirectory }
-            ?.filter { dir -> File(dir, "${dir.name}.json").isFile }
-            ?.map { it.name }
-            ?.sortedDescending()
-            ?: emptyList()
-    }
-
     data class JavaInfo(val version: String, val path: String) {
         override fun toString(): String =
             "Java $version" + if (path.isBlank()) "" else "    $path"

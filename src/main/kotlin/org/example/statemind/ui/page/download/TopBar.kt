@@ -4,14 +4,22 @@ import javafx.geometry.Pos
 import javafx.scene.control.TextField
 import javafx.scene.control.ToggleButton
 import javafx.scene.control.ToggleGroup
+import javafx.scene.input.KeyCode
+import javafx.scene.input.MouseEvent
 import javafx.scene.layout.HBox
 import javafx.scene.layout.Priority
 import javafx.scene.layout.Region
+import javafx.stage.Window
 
 /** 搜索框只过滤下方分组（见 [VersionListView]），横条与竖条不跟着变。 */
 internal class TopBar(private val onSearch: (String) -> Unit) : HBox(SEARCH_GAP) {
 
     private val group = ToggleGroup()
+
+    /** 离焦要靠场景级事件，搜索框得留个引用。 */
+    private val search = TextField()
+
+    private var focusWired = false
 
     init {
         alignment = Pos.CENTER_LEFT
@@ -32,16 +40,47 @@ internal class TopBar(private val onSearch: (String) -> Unit) : HBox(SEARCH_GAP)
             }
         }
 
-        val search = TextField().apply {
+        search.apply {
             promptText = "搜索版本"
             style = DownloadStyles.FIELD
             prefWidth = SEARCH_WIDTH
-            maxWidth = SEARCH_WIDTH
             minWidth = SEARCH_MIN
+            // 吃满选项按钮右边到页面右边那一整块：中间再塞个撑开的空位，就会留下一段死白
+            maxWidth = Double.MAX_VALUE
             textProperty().addListener { _, _, now -> onSearch(now) }
         }
+        HBox.setHgrow(search, Priority.ALWAYS)
 
-        children.setAll(options, Region().apply { HBox.setHgrow(this, Priority.ALWAYS) }, search)
+        children.setAll(options, search)
+        wireFocus()
+    }
+
+    /**
+     * 搜索框只在自己被点中时留着光标：点页面别处、切走窗口、按 Esc 都放掉。
+     * 点别处必须走场景级过滤器 —— 挂在按钮上的话，按钮不抢焦点就漏掉了。
+     */
+    private fun wireFocus() {
+        sceneProperty().addListener { _, _, scene ->
+            if (scene == null || focusWired) return@addListener
+            focusWired = true
+            scene.addEventFilter(MouseEvent.MOUSE_PRESSED) { e ->
+                if (!search.isFocused) return@addEventFilter
+                // 按在搜索框自己身上（含它内部那个文本节点）就留着
+                val box = search.localToScene(search.boundsInLocal)
+                if (box.contains(e.sceneX, e.sceneY)) return@addEventFilter
+                requestFocus()
+            }
+            if (scene.window != null) releaseOnBlur(scene.window)
+            else scene.windowProperty().addListener { _, _, window -> releaseOnBlur(window) }
+        }
+        search.setOnKeyPressed { e -> if (e.code == KeyCode.ESCAPE) requestFocus() }
+    }
+
+    private fun releaseOnBlur(window: Window?) {
+        window ?: return
+        window.focusedProperty().addListener { _, _, focused ->
+            if (!focused && search.isFocused) requestFocus()
+        }
     }
 
     private class Item(val full: String, val usable: Boolean)

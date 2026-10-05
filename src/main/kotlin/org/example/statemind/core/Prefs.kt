@@ -36,6 +36,21 @@ object Prefs {
             save()
         }
 
+    /** 「设置 · 下载」：两处下载源的取法。存枚举名 —— 手改配置文件写错了退回默认，不至于打不开。 */
+    var fileSource: FileSource
+        get() = FileSource.of(props.getProperty(KEY_FILE_SOURCE))
+        set(value) {
+            props.setProperty(KEY_FILE_SOURCE, value.name)
+            save()
+        }
+
+    var versionListSource: VersionListSource
+        get() = VersionListSource.of(props.getProperty(KEY_VERSION_LIST_SOURCE))
+        set(value) {
+            props.setProperty(KEY_VERSION_LIST_SOURCE, value.name)
+            save()
+        }
+
     /** 这个启动器实例的随机标识，生成一次长期复用：同一份 clientToken 发出去的令牌才能 refresh。 */
     val yggdrasilClientToken: String
         get() {
@@ -67,4 +82,6 @@ object Prefs {
     private const val KEY_AUTO_JAVA = "java.autoSelect"
     private const val KEY_JAVA_HOME = "java.home"
     private const val KEY_YGGDRASIL_CLIENT = "auth.yggdrasilClientToken"
+    private const val KEY_FILE_SOURCE = "download.fileSource"
+    private const val KEY_VERSION_LIST_SOURCE = "download.versionListSource"
 }

@@ -139,7 +139,12 @@ object GameDir {
         val gameDir: File,
         /** 单目录式为 null。 */
         val instanceName: String?,
-        val type: Type
+        val type: Type,
+        /**
+         * `libraries` 与 `assets` 所在目录。单目录式就是 [gameDir]；multi 系是**目录根** ——
+         * 那才是多实例共享的 libraries/assets 所在地，启动时必须指过去。
+         */
+        val sharedRoot: File = gameDir
     )
 
     /**
@@ -154,11 +159,13 @@ object GameDir {
         if ("instances" in names) {
             val instances = File(selected, "instances").listFiles { f -> f.isDirectory } ?: emptyArray()
             return instances.sortedBy { it.name.lowercase() }.map { inst ->
-                Resolved(instanceGameDir(inst) ?: File(inst, "minecraft"), inst.name, Type.MULTIMC)
+                Resolved(instanceGameDir(inst) ?: File(inst, "minecraft"), inst.name, Type.MULTIMC, selected)
             }
         }
         if ("instance.cfg" in names || "mmc-pack.json" in names) {
-            return listOf(Resolved(instanceGameDir(selected) ?: File(selected, "minecraft"), selected.name, Type.MULTIMC))
+            return listOf(
+                Resolved(instanceGameDir(selected) ?: File(selected, "minecraft"), selected.name, Type.MULTIMC, selected)
+            )
         }
         // 选中的是「装着 .minecraft 的外层文件夹」（比如 %APPDATA%）：往里再看一层
         if (!File(selected, "versions").isDirectory) {

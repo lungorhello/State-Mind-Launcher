@@ -6,7 +6,7 @@ import javafx.scene.Node
 import javafx.scene.layout.Priority
 import javafx.scene.layout.StackPane
 import javafx.scene.layout.VBox
-import org.example.statemind.core.DEFAULT_SOURCES
+import org.example.statemind.core.Prefs
 import org.example.statemind.core.RemoteVersion
 import org.example.statemind.core.VersionEntry
 import org.example.statemind.ui.Page
@@ -65,7 +65,7 @@ class DownloadPage : Page {
         hero.setLoading()
         list.setLoading()
         Thread {
-            val outcome = runCatching { RemoteVersion.load(DEFAULT_SOURCES) }
+            val outcome = runCatching { RemoteVersion.load(Prefs.versionListSource.attempts) }
             Platform.runLater {
                 outcome
                     .onSuccess { result ->

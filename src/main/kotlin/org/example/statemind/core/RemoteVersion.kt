@@ -13,20 +13,20 @@ object RemoteVersion {
         val latestSnapshot: VersionEntry?,
         val versions: List<VersionEntry>,
 
-        /** 走缓存时是 [sources] 的第一个。 */
+        /** 走缓存时是 [attempts] 里第一个源。 */
         val source: DownloadSource,
         val fromCache: Boolean
     )
 
-    /** 依次尝试 [sources]，任一成功即返回；都失败退到缓存，两边都没有才抛。 */
-    fun load(sources: List<DownloadSource>): Result {
+    /** 依次尝试 [attempts]，任一成功即返回；都失败退到缓存，两边都没有才抛。 */
+    fun load(attempts: List<SourceAttempt>): Result {
         var failure: Throwable? = null
-        for (source in sources) {
-            runCatching { fetchFromNetwork(source) }
+        for (attempt in attempts) {
+            runCatching { fetchFromNetwork(attempt) }
                 .onSuccess { return it }
                 .onFailure { failure = it }
         }
-        cached(sources.first())?.let { return it }
+        cached(attempts.first().source)?.let { return it }
         val cause = failure
         throw if (cause is Exception) cause else IOException("版本清单获取失败", cause)
     }
@@ -40,10 +40,10 @@ object RemoteVersion {
             ?.copy(fromCache = true)
     }
 
-    private fun fetchFromNetwork(source: DownloadSource): Result {
-        val response = Http.get(source.manifestUrl)
+    private fun fetchFromNetwork(attempt: SourceAttempt): Result {
+        val response = Http.get(attempt.source.manifestUrl, attempt.timeoutSeconds)
         if (response.status !in 200..299) throw IOException("HTTP ${response.status}")
-        val parsed = parse(response.body, source)
+        val parsed = parse(response.body, attempt.source)
         writeCache(response.body)
         return parsed
     }

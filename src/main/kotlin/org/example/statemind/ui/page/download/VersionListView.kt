@@ -140,6 +140,20 @@ internal class VersionListView(private val onPick: (VersionEntry) -> Unit) : Sta
 
     private inner class RowCell : ListCell<Row>() {
 
+        /**
+         * 同一个 Row 必须复用同一个节点。
+         *
+         * ListView 在**选中项变化时会重跑 updateItem**（实测：普通 ListView 也会）。
+         * 若在这里重建节点，第一次点击会变成「按下落在旧节点、抬起落在新节点」——
+         * JavaFX 只在按下与抬起是同一个节点时才生成 MOUSE_CLICKED，于是那一次点击整个丢失，
+         * 表现为「每次操作要点两次」。第二次点击选中项没变化，才不会重建。
+         *
+         * Row 是不可变数据、渲染完全由它决定，所以按值复用是安全的；
+         * 折叠/搜索会生成新的 Row 值，自然走重建分支。
+         */
+        private var builtFor: Row? = null
+        private var built: Region? = null
+
         init {
             // 抹掉 ListCell 自带的悬停与选中底色：卡片的白是画在 graphic 上的
             style = "-fx-background-color: transparent; -fx-padding: 0;"
@@ -147,12 +161,20 @@ internal class VersionListView(private val onPick: (VersionEntry) -> Unit) : Sta
 
         override fun updateItem(item: Row?, empty: Boolean) {
             super.updateItem(item, empty)
-            graphic = when {
-                empty || item == null -> null
-                item is Row.Header -> headerNode(item)
-                item is Row.Item -> itemNode(item)
-                else -> null
+            if (empty || item == null) {
+                builtFor = null
+                built = null
+                graphic = null
+                return
             }
+            if (builtFor != item) {
+                builtFor = item
+                built = when (item) {
+                    is Row.Header -> headerNode(item)
+                    is Row.Item -> itemNode(item)
+                }
+            }
+            graphic = built
         }
     }
 

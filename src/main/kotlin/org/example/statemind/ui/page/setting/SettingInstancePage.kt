@@ -36,8 +36,9 @@ import java.util.concurrent.Callable
  * （传统目录 / multi 系都收，见 [GameDir.resolve]）→ 成功弹窗报出识别结果和版本数，
  * 失败则说清原因并**带着已填的内容**退回表单，不用重填。
  *
- * 这一版**只做展示**：卡片点了没反应，启动仍走首页那套（默认 .minecraft）。
- * 目录清单存在 [GameDirStore]（数据根目录的 `gamedirs.txt`），版本每次刷新现扫（[InstanceScan]）。
+ * 这一版**只做展示**：卡片点了没反应，启动仍在首页选 —— 但首页会把「版本 + 它所属的目录」
+ * 一起带上，所以选了别的目录里的版本，启动用的就是那个目录。
+ * 清单 = [GameDirStore.all]（内置的默认目录 + 用户添加的那几条），版本每次刷新现扫（[InstanceScan.scanAll]）。
  */
 class SettingInstancePage : Page {
 
@@ -68,7 +69,7 @@ class SettingInstancePage : Page {
     private var root: VBox? = null
 
     /** 最近一次扫描的结果。换排列方式只重排，不重扫。 */
-    private var scanned: List<Group> = emptyList()
+    private var scanned: List<InstanceScan.Directory> = emptyList()
 
     override fun build(): Node {
         // ── 1. 顶部一行：添加按钮 + 排列方式 ────────────────────────────────
@@ -110,57 +111,28 @@ class SettingInstancePage : Page {
 
     // ---------- 刷新 ----------
 
-    private fun refresh() {
-        scanned = scanAll()
-        layoutGroups()
-    }
-
     /**
-     * 把清单里每个目录摊平成若干分组（multi 系一个实例一组），并扫出各自的版本。
+     * 重扫所有游戏目录（内置的默认目录 + 用户添加的），每个目录摊平成若干分组。
      * 纯文件读，没网络请求；版本数量在几十个的量级上是毫秒级，所以直接在界面线程做。
      */
-    private fun scanAll(): List<Group> {
-        val out = ArrayList<Group>()
-        for (entry in GameDirStore.entries) {
-            val resolved = GameDir.resolve(entry.root)
-            for (r in resolved) {
-                val versions =
-                    if (r.gameDir.isDirectory) InstanceScan.scan(r.gameDir) else emptyList()
-                out.add(
-                    Group(
-                        title = if (r.instanceName != null) "${entry.name} · ${r.instanceName}" else entry.name,
-                        note = if (r.type == GameDir.Type.EMPTY) r.type.label
-                        else "${r.type.label} · ${versions.size} 个版本",
-                        path = r.gameDir.absolutePath,
-                        rootPath = entry.path,
-                        rootName = entry.name,
-                        instances = resolved.size,
-                        versions = versions
-                    )
-                )
-            }
-        }
-        return out
+    private fun refresh() {
+        scanned = InstanceScan.scanAll(GameDirStore.all)
+        layoutGroups()
     }
 
     /** 按当前排列方式把分组铺出来。只动节点，不读盘。 */
     private fun layoutGroups() {
         groups.children.clear()
-        if (scanned.isEmpty()) {
-            groups.children += Label("还没有添加游戏目录，点上面的「添加游戏目录」加一个。").apply {
-                style = "-fx-font-size: 13px; -fx-text-fill: #9a9aa0;"
-            }
-            return
-        }
-        scanned.forEach { groups.children += groupCard(it) }
+        // 内置的默认目录永远在，所以这里不会是空的
+        scanned.forEach { groups.children += groupCard(it, removable = !GameDirStore.isBuiltin(it.rootPath)) }
     }
 
-    /** 一个目录（或一个 multi 系实例）：标题行 + 里面的版本卡片。 */
-    private fun groupCard(g: Group): Node {
+    /** 一个目录（或一个 multi 系实例）：标题行 + 里面的版本卡片。[removable] 为假的是内置目录。 */
+    private fun groupCard(g: InstanceScan.Directory, removable: Boolean): Node {
         val title = Label(g.title).apply {
             style = "-fx-font-size: 14px; -fx-font-weight: bold; -fx-text-fill: #1f1f22;"
         }
-        val path = Label(g.path).apply {
+        val path = Label(g.gameDir.absolutePath).apply {
             style = "-fx-font-size: 12px; -fx-text-fill: #9a9aa0;"
             maxWidth = Double.MAX_VALUE
             // 首选宽度必须压到 0：路径很长，让它按文字撑开的话整行会溢出，
@@ -171,16 +143,21 @@ class SettingInstancePage : Page {
         val nameBox = VBox(2.0, title, path).apply { minWidth = 0.0 }   // 窄窗口里能被压缩，长路径靠省略号
         HBox.setHgrow(nameBox, Priority.ALWAYS)
 
-        val note = Label(g.note).apply { style = "-fx-font-size: 12px; -fx-text-fill: #9a9aa0;" }
-        val remove = Button("移除").apply {
-            style = BTN_GHOST_SMALL
-            setOnAction { askRemove(g) }
+        val note = Label(
+            if (g.type == GameDir.Type.EMPTY) g.type.label
+            else "${g.type.label} · ${g.versions.size} 个版本"
+        ).apply { style = "-fx-font-size: 12px; -fx-text-fill: #9a9aa0;" }
+        val header = HBox(10.0, nameBox, note).apply { alignment = Pos.CENTER_LEFT }
+        if (removable) {
+            header.children += Button("移除").apply {
+                style = BTN_GHOST_SMALL
+                setOnAction { askRemove(g) }
+            }
         }
-        val header = HBox(10.0, nameBox, note, remove).apply { alignment = Pos.CENTER_LEFT }
 
         val cards = VBox(8.0)
         // 路径不在（目录被删/被搬走）时不留空话 —— 组标题上已经写着「路径不存在」了
-        fillCards(cards, g.versions, if (File(g.path).isDirectory) "这个目录里还没有版本。" else "")
+        fillCards(cards, g.versions, if (g.gameDir.isDirectory) "这个目录里还没有版本。" else "")
 
         return VBox(10.0, header, cards).apply {
             padding = Insets(12.0)
@@ -422,11 +399,12 @@ class SettingInstancePage : Page {
 
     // ---------- 移除目录 ----------
 
-    private fun askRemove(g: Group) {
+    private fun askRemove(g: InstanceScan.Directory) {
+        val instances = scanned.count { it.rootPath == g.rootPath }
         val body = buildString {
-            append("确定要把「").append(g.rootName).append("」从列表里移除吗？\n")
-            if (g.instances > 1) {
-                append("「").append(g.rootName).append("」下有 ").append(g.instances)
+            append("确定要把「").append(g.sourceName).append("」从列表里移除吗？\n")
+            if (instances > 1) {
+                append("「").append(g.sourceName).append("」下有 ").append(instances)
                     .append(" 个实例，整条目录都会一起消失。\n")
             }
             append("只从启动器列表里移除，硬盘上的文件不会被删除。")
@@ -448,19 +426,6 @@ class SettingInstancePage : Page {
         6.0,
         Label(labelText).apply { style = "-fx-font-size: 13px; -fx-text-fill: #555555;" },
         control
-    )
-
-    /** 一个分组（= 一条目录记录 or multi 系里的一个实例）。 */
-    private data class Group(
-        val title: String,
-        val note: String,
-        val path: String,
-        /** 移除时按这个路径找记录 —— multi 系的多个分组共用同一条记录。 */
-        val rootPath: String,
-        val rootName: String,
-        /** 这条记录一共摊出了几个实例（> 1 时移除确认框要额外提醒）。 */
-        val instances: Int,
-        val versions: List<InstanceScan.Version>
     )
 
     private companion object {

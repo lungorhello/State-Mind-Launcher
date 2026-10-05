@@ -23,7 +23,11 @@ object LaunchUtil {
         /** 额外的 JVM 参数（外置登录的 `-javaagent` 三件套），会插在主类之前。 */
         val extraJvmArgs: List<String> = emptyList(),
         /** `${user_properties}` 占位符的值，没有就空对象。 */
-        val userProperties: String = "{}"
+        val userProperties: String = "{}",
+        /** `versions/` 所在目录；null = StateMind 自带的 `.minecraft`。 */
+        val versionRoot: File? = null,
+        /** `libraries/` 与 `assets/` 所在目录；null = 同 [versionRoot]。multi 系在目录根，多实例共享。 */
+        val sharedRoot: File? = null
     )
 
     data class Plan(
@@ -54,14 +58,17 @@ object LaunchUtil {
     }
 
     fun plan(cfg: Config, onProgress: (String) -> Unit = {}): Plan {
-        val mcDir = BackendUtil.minecraftDir
-        GameDir.ensure(mcDir)   // 首次使用生成骨架，缺项补齐
-        val versionDir = File(mcDir, "versions/${cfg.version}")
+        val versionRoot = cfg.versionRoot ?: BackendUtil.minecraftDir
+        val sharedRoot = cfg.sharedRoot ?: versionRoot
+        // 只有目录还不存在时才补骨架。已存在的那种可能不是我们建的（用户的 PCL / 官方 .minecraft），
+        // 往里塞 marker 文件不礼貌，缺目录也轮不到我们替他造。
+        if (!versionRoot.isDirectory) GameDir.ensure(versionRoot)
+        val versionDir = File(versionRoot, "versions/${cfg.version}")
         val jsonFile = File(versionDir, "${cfg.version}.json")
         require(jsonFile.isFile) { "找不到版本文件：${jsonFile.absolutePath}" }
 
         onProgress("读取版本信息…")
-        val loaded = loadVersion(mcDir, cfg.version)
+        val loaded = loadVersion(versionRoot, cfg.version)
         val root = loaded.flat
         if (loaded.parents.isNotEmpty()) {
             onProgress("已合并父版本 ${loaded.parents.joinToString(" → ")}")
@@ -76,12 +83,12 @@ object LaunchUtil {
             is Map<*, *> -> (a["id"] as? String) ?: "legacy"
             else -> "legacy"
         }
-        if (!File(mcDir, "assets/indexes/$assetsIndex.json").isFile) {
+        if (!File(sharedRoot, "assets/indexes/$assetsIndex.json").isFile) {
             onProgress("提示：缺少资源索引 $assetsIndex.json，游戏资源可能加载不全")
         }
 
         onProgress("收集依赖库…")
-        val libDir = File(mcDir, "libraries")
+        val libDir = File(sharedRoot, "libraries")
         val libraries = (root["libraries"] as? List<*>)?.filterIsInstance<Map<*, *>>() ?: emptyList()
 
         val jars = ArrayList<String>(libraries.size + 1)
@@ -115,7 +122,7 @@ object LaunchUtil {
             "auth_player_name" to cfg.playerName,
             "version_name" to cfg.version,
             "game_directory" to gameDir.absolutePath,
-            "assets_root" to File(mcDir, "assets").absolutePath,
+            "assets_root" to File(sharedRoot, "assets").absolutePath,
             "assets_index_name" to assetsIndex,
             // 官方模板里 UUID 不带横线；第三方用皮肤站给的角色 UUID，离线按名字算
             "auth_uuid" to (cfg.uuid?.replace("-", "") ?: offlineUuid(cfg.playerName)),
@@ -171,7 +178,7 @@ object LaunchUtil {
     )
 
     /** 读版本 json；遇到 inheritsFrom 就把父版本合并进来，子层优先（Forge / OptiFine 都靠这个）。 */
-    private fun loadVersion(mcDir: File, id: String): Loaded {
+    private fun loadVersion(versionRoot: File, id: String): Loaded {
         val chain = ArrayList<Map<*, *>>()      // 子 → 父
         val parents = ArrayList<String>()
         var clientJar: File? = null
@@ -179,10 +186,10 @@ object LaunchUtil {
         var guard = 0
         while (true) {
             if (guard++ > 8) throw IllegalStateException("版本继承层数过多：$id")
-            val f = File(mcDir, "versions/$cur/$cur.json")
+            val f = File(versionRoot, "versions/$cur/$cur.json")
             require(f.isFile) { "找不到版本文件：${f.absolutePath}" }
             if (clientJar == null) {
-                File(mcDir, "versions/$cur/$cur.jar").takeIf { it.isFile }?.let { clientJar = it }
+                File(versionRoot, "versions/$cur/$cur.jar").takeIf { it.isFile }?.let { clientJar = it }
             }
             val m = MiniJson.parse(f.readText()) as? Map<*, *>
                 ?: throw IllegalStateException("版本文件格式不对：${f.absolutePath}")
@@ -472,9 +479,9 @@ object LaunchUtil {
     data class JavaCheck(val blocked: Boolean, val message: String)
 
     /** 读版本要求的 Java 大版本（继承链上子层优先），json 里没写就返回 null。 */
-    fun requiredJavaMajor(version: String): Int? {
+    fun requiredJavaMajor(version: String, versionRoot: File = BackendUtil.minecraftDir): Int? {
         return try {
-            val root = loadVersion(BackendUtil.minecraftDir, version).flat
+            val root = loadVersion(versionRoot, version).flat
             val jv = root["javaVersion"] as? Map<*, *> ?: return null
             asInt(jv["majorVersion"])
         } catch (_: Exception) {
@@ -494,8 +501,12 @@ object LaunchUtil {
      * 比对选中的 Java 和版本要求的 Java，没问题返回 null。
      * 低了必崩（blocked）；高一点没关系，高出太多才提醒（Mixin / ASM 版本对不上会崩）。
      */
-    fun checkJava(version: String, javaVersionText: String): JavaCheck? {
-        val required = requiredJavaMajor(version) ?: return null
+    fun checkJava(
+        version: String,
+        javaVersionText: String,
+        versionRoot: File = BackendUtil.minecraftDir
+    ): JavaCheck? {
+        val required = requiredJavaMajor(version, versionRoot) ?: return null
         val actual = javaMajor(javaVersionText) ?: return null
         return when {
             actual == required -> null

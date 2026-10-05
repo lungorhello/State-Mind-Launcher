@@ -1,5 +1,6 @@
 package org.example.statemind.ui.page.download
 
+import javafx.beans.binding.Bindings
 import javafx.geometry.Insets
 import javafx.geometry.Pos
 import javafx.scene.Cursor
@@ -17,6 +18,7 @@ import javafx.scene.paint.Stop
 import javafx.scene.text.Font
 import javafx.scene.text.FontWeight
 import javafx.scene.text.Text
+import javafx.scene.text.TextBoundsType
 import org.example.statemind.core.RemoteVersion
 import org.example.statemind.core.VersionEntry
 
@@ -40,7 +42,7 @@ internal class VersionHero(private val onPick: (VersionEntry) -> Unit) : HBox(GA
         HBox.setHgrow(cards, Priority.ALWAYS)
 
         val bars = HBox(BAR_GAP).apply {
-            alignment = Pos.CENTER
+            alignment = Pos.TOP_LEFT
             children.setAll(COMMON_VERSIONS.map { bar(it) })
         }
 
@@ -69,15 +71,44 @@ internal class VersionHero(private val onPick: (VersionEntry) -> Unit) : HBox(GA
     // ---------- 竖条 ----------
 
     private fun bar(item: CommonVersion): Region {
-        val caption = verticalText(CAPTION, CAPTION_SIZE, Color.web(DownloadStyles.TEXT_DIM), -2.0)
-        val version = verticalText(item.id, ID_SIZE, gradientOf(item.colors), -6.0)
+        val caption = verticalText(CAPTION, CAPTION_SIZE, Color.web(DownloadStyles.TEXT), CAPTION_SPACING)
 
-        return StackPane(
-            HBox(6.0, caption, version).apply {
-                alignment = Pos.CENTER
-                isMouseTransparent = true
-            }
-        ).apply {
+        val label = Text(item.id).apply {
+            font = Font.font(Font.getDefault().family, FontWeight.BOLD, ID_SIZE)
+            fill = gradientOf(item.colors)
+            // 逆时针 = 版本号从条底往上读
+            rotate = -90.0
+            // 按墨迹包围盒布局：黑字是 14px 多行、版本号是 22px 单行转过 90°，
+            // 字号不同则「em 框到墨迹」的空隙不同，用 em 框对齐会让两个顶端差 2px。
+            boundsType = TextBoundsType.VISUAL
+            isMouseTransparent = true
+        }
+
+        // rotate 不改 layoutBounds（按墨迹算也一样），槽位得自己贴合：转过 90° 后
+        // 文字的墨迹高度 = 未转时的墨迹宽度、墨迹宽度 = 未转时的墨迹高度，
+        // 所以两轴都绑上去，视觉墨迹才正好落在槽位内、顶端与黑字齐平。
+        val length = Bindings.createDoubleBinding({ label.layoutBounds.width }, label.layoutBoundsProperty())
+        val thickness = Bindings.createDoubleBinding({ label.layoutBounds.height }, label.layoutBoundsProperty())
+        val slot = StackPane(label).apply {
+            minWidthProperty().bind(thickness)
+            prefWidthProperty().bind(thickness)
+            maxWidthProperty().bind(thickness)
+            minHeightProperty().bind(length)
+            prefHeightProperty().bind(length)
+            maxHeightProperty().bind(length)
+            isMouseTransparent = true
+        }
+
+        // 黑字归左上角、版本号归右上角 —— 各自定位，中间的空白不用谁来分配。
+        val content = StackPane(caption, slot).apply {
+            StackPane.setAlignment(caption, Pos.TOP_LEFT)
+            StackPane.setAlignment(slot, Pos.TOP_RIGHT)
+            isMouseTransparent = true
+        }
+
+        return StackPane(content).apply {
+            alignment = Pos.TOP_LEFT
+            padding = Insets(BAR_TOP_INSET, BAR_RIGHT_INSET, 0.0, BAR_LEFT_INSET)
             minWidth = DownloadStyles.BAR_WIDTH
             prefWidth = DownloadStyles.BAR_WIDTH
             maxWidth = DownloadStyles.BAR_WIDTH
@@ -95,6 +126,7 @@ internal class VersionHero(private val onPick: (VersionEntry) -> Unit) : HBox(GA
             font = Font.font(Font.getDefault().family, FontWeight.BOLD, size)
             fill = paint
             lineSpacing = spacing
+            boundsType = TextBoundsType.VISUAL
             isMouseTransparent = true
         }
 
@@ -103,7 +135,8 @@ internal class VersionHero(private val onPick: (VersionEntry) -> Unit) : HBox(GA
         val stops = colors.mapIndexed { index, hex ->
             Stop(index.toDouble() / (colors.size - 1), Color.web(hex))
         }
-        return LinearGradient(0.0, 0.0, 0.0, 1.0, true, CycleMethod.NO_CYCLE, *stops.toTypedArray())
+        // 沿文字自身的方向取色：转过 −90° 之后在屏幕上就是从下往上，颜色才一个字一个字地数过去。
+        return LinearGradient(0.0, 0.0, 1.0, 0.0, true, CycleMethod.NO_CYCLE, *stops.toTypedArray())
     }
 
     // ---------- 横条卡 ----------
@@ -123,8 +156,8 @@ internal class VersionHero(private val onPick: (VersionEntry) -> Unit) : HBox(GA
 
         private var fontSize = 0.0
 
-        val root: VBox = VBox(4.0, version, note).apply {
-            padding = Insets(14.0, 16.0, 14.0, 16.0)
+        val root: VBox = VBox(2.0, version, note).apply {
+            padding = Insets(9.0, 16.0, 9.0, 16.0)
             minWidth = 0.0
             cursor = Cursor.HAND
             style = cardStyle(DownloadStyles.CARD_BG)
@@ -169,12 +202,17 @@ internal class VersionHero(private val onPick: (VersionEntry) -> Unit) : HBox(GA
     private companion object {
 
         const val GAP = 12.0
-        const val CARD_GAP = 10.0
+        const val CARD_GAP = 8.0
         const val BAR_GAP = 8.0
 
         const val CAPTION = "常见版本"
-        const val CAPTION_SIZE = 10.0
-        const val ID_SIZE = 21.0
+        const val CAPTION_SIZE = 12.0
+        const val CAPTION_SPACING = 2.0
+        const val ID_SIZE = 26.0
+
+        const val BAR_TOP_INSET = 12.0
+        const val BAR_LEFT_INSET = 10.0
+        const val BAR_RIGHT_INSET = 14.0
 
         const val BAR_STYLE =
             "-fx-background-color: ${DownloadStyles.CARD_BG};" +
