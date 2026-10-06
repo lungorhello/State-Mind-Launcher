@@ -1,6 +1,7 @@
 package org.example.statemind.core
 
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * 「要启动哪一个版本」。
@@ -26,5 +27,24 @@ data class LaunchTarget(
  * 不能只存在首页那个下拉里。
  */
 object LaunchSelection {
+
+    private val listeners = CopyOnWriteArrayList<() -> Unit>()
+
     var current: LaunchTarget? = null
+        private set
+
+    /**
+     * 首页换版本时调它。「设置 · 启动」那句「将使用 Java x.y.z」必须在选定版本上算，
+     * 而设置页可能正开着 —— 只靠「进页面时刷一次」会一直显示上一个版本的结果。
+     */
+    fun select(target: LaunchTarget?) {
+        if (current == target) return
+        current = target
+        listeners.forEach { it() }
+    }
+
+    /** 回调在调用方线程（界面线程）上。 */
+    fun onChange(listener: () -> Unit) {
+        listeners += listener
+    }
 }

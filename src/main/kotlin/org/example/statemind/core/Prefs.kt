@@ -51,6 +51,22 @@ object Prefs {
             save()
         }
 
+    /** 「设置 · 下载」：同时下载几个文件。0 = 无限制，实际封顶 [THREADS_MAX]。 */
+    var downloadThreads: Int
+        get() = readInt(KEY_DOWNLOAD_THREADS, 0, THREADS_MAX)
+        set(value) {
+            props.setProperty(KEY_DOWNLOAD_THREADS, value.coerceIn(0, THREADS_MAX).toString())
+            save()
+        }
+
+    /** 「设置 · 下载」：整机限速（KB/s）。0 = 不限速。 */
+    var downloadSpeedKbps: Int
+        get() = readInt(KEY_DOWNLOAD_SPEED_KBPS, 0, SPEED_MAX_KBPS)
+        set(value) {
+            props.setProperty(KEY_DOWNLOAD_SPEED_KBPS, value.coerceIn(0, SPEED_MAX_KBPS).toString())
+            save()
+        }
+
     /** 这个启动器实例的随机标识，生成一次长期复用：同一份 clientToken 发出去的令牌才能 refresh。 */
     val yggdrasilClientToken: String
         get() {
@@ -62,6 +78,10 @@ object Prefs {
         }
 
     val location: File get() = file
+
+    /** 手改配置文件写了负数/离谱数值时夹回范围，不至于把界面或下载器搞坏。 */
+    private fun readInt(key: String, defaultValue: Int, max: Int): Int =
+        props.getProperty(key)?.trim()?.toIntOrNull()?.coerceIn(0, max) ?: defaultValue
 
     private fun readFlag(key: String, defaultValue: Boolean): Boolean =
         props.getProperty(key)?.toBooleanStrictOrNull() ?: defaultValue
@@ -84,4 +104,12 @@ object Prefs {
     private const val KEY_YGGDRASIL_CLIENT = "auth.yggdrasilClientToken"
     private const val KEY_FILE_SOURCE = "download.fileSource"
     private const val KEY_VERSION_LIST_SOURCE = "download.versionListSource"
+    private const val KEY_DOWNLOAD_THREADS = "download.threads"
+    private const val KEY_DOWNLOAD_SPEED_KBPS = "download.speedKbps"
+
+    /** 「无限制」时的实际线程上限：再高只会把磁盘和网络排队排死。 */
+    const val THREADS_MAX = 64
+
+    /** 限速滑条上限 100 MB/s —— 再高就没有限速的意义了。 */
+    const val SPEED_MAX_KBPS = 102_400
 }

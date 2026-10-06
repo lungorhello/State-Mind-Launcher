@@ -8,12 +8,15 @@ import javafx.geometry.Insets
 import javafx.scene.Scene
 import javafx.scene.control.*
 import javafx.scene.layout.*
+import javafx.scene.paint.Color
 import javafx.stage.Stage
+import javafx.stage.StageStyle
 import javafx.util.Duration
 import org.example.statemind.core.BackendUtil
 import org.example.statemind.core.BackendUtil.JavaInfo
 import org.example.statemind.core.Account
 import org.example.statemind.core.AccountStore
+import org.example.statemind.core.download.DownloadCenter
 import org.example.statemind.core.auth.LaunchAuth
 import org.example.statemind.core.JavaStore
 import org.example.statemind.core.LaunchUtil
@@ -27,11 +30,14 @@ import org.example.statemind.ui.NavBar
 import org.example.statemind.ui.Page
 import org.example.statemind.ui.PageHost
 import org.example.statemind.ui.Theme
+import org.example.statemind.ui.Typo
+import org.example.statemind.ui.WindowChrome
 import org.example.statemind.ui.ThirdPartySignIn
 import org.example.statemind.ui.page.DownloadPage
 import org.example.statemind.ui.page.HelpPage
 import org.example.statemind.ui.page.HomePage
 import org.example.statemind.ui.page.SettingPage
+import org.example.statemind.ui.page.TaskPage
 import java.util.concurrent.CountDownLatch
 
 class App : Application() {
@@ -51,6 +57,10 @@ class App : Application() {
         // 全局主题（须在创建 Scene 之前设置，首帧才生效）
         Application.setUserAgentStylesheet(PrimerLight().userAgentStylesheet)
 
+        // 自绘窗口：系统标题栏整个不要，窗口按钮、拖动、拖边缩放、圆角都在 WindowChrome 里。
+        // 必须建成**透明**的 —— 圆角以外的像素要能透出去，见 WindowChrome.roundedShell
+        stage.initStyle(StageStyle.TRANSPARENT)
+
         // 打开启动器即刻补全标准 .minecraft 骨架（无需先点启动），与 PCL 等启动器行为一致
         GameDir.ensure(BackendUtil.minecraftDir)
 
@@ -64,7 +74,7 @@ class App : Application() {
             maxWidth = Double.MAX_VALUE
         }
         // 选中的就是「要启动哪一个版本」—— 「设置 · 启动」要按它报出「将使用 Java x.y.z」
-        gameVersion.valueProperty().addListener { _, _, now -> LaunchSelection.current = now?.target }
+        gameVersion.valueProperty().addListener { _, _, now -> LaunchSelection.select(now?.target) }
 
         val status = Label("").apply {
             style = "-fx-font-size: 12px; -fx-text-fill: #666666;"
@@ -101,12 +111,33 @@ class App : Application() {
         // ── 分页（第 1 步：只搭框架，不迁移逻辑）──────────────────────────
         // 左边是导航栏，右边是页面容器；页面懒加载，只有被点开的那个才会 build()。
         // 首页的内容暂时是原来那套启动表单（整块挪过来显示），启动逻辑仍留在本文件里。
-        val pages: List<Page> = listOf(HomePage { leftPanel }, DownloadPage(), SettingPage(), HelpPage())
+        // 任务页不上导航，入口只有标题栏那个下载图标：按一下进去，再按一下回原来那页。
+        var showTasks: () -> Unit = {}
+        val pages: List<Page> = listOf(
+            HomePage { leftPanel },
+            DownloadPage { showTasks() },
+            SettingPage(),
+            HelpPage(),
+            TaskPage()
+        )
         val pageHost = PageHost(pages)
 
+        /** 从任务页退回来时落在哪一页 —— 永远记着最近一个「不是任务页」的页面。 */
+        var lastPage = pages.first().id
+        showTasks = { if (pageHost.currentPage?.id != TaskPage.ID) pageHost.open(TaskPage.ID) }
+
         val navBar = NavBar(pages) { id -> pageHost.open(id) }
-        // 切页只同步选中态 —— 导航栏宽度固定，不再为二级 tab 收窄（84 已经够窄了）
-        pageHost.onPageChanged = { id -> navBar.select(id) }
+        val titleBar = WindowChrome.titleBar(stage) {
+            if (pageHost.currentPage?.id == TaskPage.ID) pageHost.open(lastPage) else showTasks()
+        }
+
+        // 切页只同步选中态 —— 导航栏宽度固定，不再为二级 tab 收窄（84 已经够窄了）。
+        // 顺便记下退回目标、点亮标题栏那个按钮：当前在不在任务页，只有这一处判断
+        pageHost.onPageChanged = { id ->
+            navBar.select(id)
+            titleBar.tasksActive = id == TaskPage.ID
+            if (id != TaskPage.ID) lastPage = id
+        }
 
         val content = BorderPane().apply {
             left = navBar      // 导航栏在左侧
@@ -121,13 +152,32 @@ class App : Application() {
         // 窗口可以放大，但不能拖得太小：再小左导航 + 二级 tab 就把内容区挤没了。
         // 660 = 84(主导航) + 96(二级 tab) + 480(内容区，够放下玩家页那张横幅卡片和三个按钮)；
         // 560 = 首页表单 + 「设置 · 启动」那种卡片页的舒适下限。想放宽/收紧就改这两个数。
-        stage.minWidth = 660.0
-        stage.minHeight = 560.0
+        // 自绘标题栏、圆角投影外的一圈留白都另占地方，最小值要加回去，内容区才不会被压小
+        val margin = WindowChrome.SHADOW_MARGIN * 2
+        val minWindowWidth = MIN_CONTENT_WIDTH + margin
+        val minWindowHeight = MIN_CONTENT_HEIGHT + WindowChrome.TITLE_BAR_HEIGHT + margin
+        stage.minWidth = minWindowWidth
+        stage.minHeight = minWindowHeight
+
+        val body = VBox(titleBar.root, content).apply { VBox.setVgrow(content, Priority.ALWAYS) }
 
         // 强调色在场景根上覆盖一次，整棵树（下拉聚焦边框、开关、主按钮…）都跟着变紫。
         // 别改回「给单个控件写样式」：那样只有被点到的那个控件是紫的，其余还是主题蓝。
-        val root = StackPane(content, overlay).apply { style = Theme.accentStyle }
-        stage.scene = Scene(root, 900.0, 620.0)
+        // 末尾那句 transparent 是**必须的**：场景根节点自带 `root` 样式类，AtlantaFX 的 `.root`
+        // 规则里写着 `-fx-background-color: -color-bg-default`，会把整块矩形（连同外圈留给投影的
+        // 那 20px）一起刷白 —— 圆角窗口外面就套了一圈白框。行内样式优先级最高，只压掉这一条，
+        // `.root` 上那族 -color-* 变量照旧生效（删掉 root 样式类会连变量一起丢，别那么干）。
+        val root = WindowChrome.roundedShell(StackPane(body, overlay)).apply {
+            style = Theme.accentStyle + "-fx-background-color: transparent;"
+        }
+        // 场景要留出投影那一圈，且底色必须透明 —— 圆角以外的像素得透出去
+        stage.scene = Scene(
+            root,
+            900.0 + margin,
+            620.0 + WindowChrome.TITLE_BAR_HEIGHT + margin,
+            Color.TRANSPARENT
+        )
+        WindowChrome.attachResize(root, stage, minWindowWidth, minWindowHeight)
         stage.show()
 
         // 默认停在第一个页面（首页）
@@ -135,28 +185,46 @@ class App : Application() {
 
         // 后台扫描**所有游戏目录**里的版本（要读一堆 json）。Java 的扫描同样慢，交给 JavaStore
         // 自己跑后台线程 —— 它扫完会通知「设置 · 启动」页，本文件不用再管那份列表。
-        Thread {
-            val dirs = runCatching { InstanceScan.scanAll(GameDirStore.all) }
-                .getOrDefault(emptyList())
-            val choices = choicesOf(dirs)
-            JavaStore.refresh()
-            Platform.runLater {
-                if (choices.isEmpty()) {
-                    gameVersion.items.setAll(Choice(null, NO_VERSION))
-                    gameVersion.isDisable = true
-                } else {
-                    gameVersion.items.setAll(choices)
-                    gameVersion.isDisable = false
+        //
+        // 不只是启动时扫一次：装完一个新版本再扫一遍，首页下拉里就自己多出这一项。
+        // 重扫**保住用户当前选的那个版本** —— 刚下完就把人家正在选的版本顶掉，比不刷新更烦人。
+        fun rescan(first: Boolean) {
+            Thread {
+                val dirs = runCatching { InstanceScan.scanAll(GameDirStore.all) }
+                    .getOrDefault(emptyList())
+                val choices = choicesOf(dirs)
+                if (first) JavaStore.refresh()
+                Platform.runLater {
+                    val previous = gameVersion.value?.target
+                    if (choices.isEmpty()) {
+                        // 占位项是列表里**真实的一项**：ComboBox 没有选中值时连提示文字都不画
+                        // （0.2 起的老毛病），只能靠「选中项确实在 items 里」这条路
+                        gameVersion.items.setAll(Choice(null, NO_VERSION))
+                        gameVersion.isDisable = true
+                        gameVersion.value = gameVersion.items[0]
+                    } else {
+                        gameVersion.items.setAll(choices)
+                        gameVersion.isDisable = false
+                        gameVersion.value = choices.firstOrNull { it.target == previous } ?: choices.first()
+                    }
+                    // Java 有没有不在这里判：真点启动时再解析，缺 Java 会弹窗说清楚原因
+                    launchBtn.isDisable = choices.isEmpty()
+                    // 状态行只在首次扫描时写 —— 重扫是用户刚下完东西那会儿触发的，
+                    // 那行可能正显示着别的话，不该被一句「就绪」冲掉
+                    if (first) {
+                        setStatus(
+                            if (choices.isEmpty()) "未检测到已安装的游戏版本，请先安装一个版本"
+                            else "就绪"
+                        )
+                    }
                 }
-                gameVersion.value = gameVersion.items[0]
-                // Java 有没有不在这里判：真点启动时再解析，缺 Java 会弹窗说清楚原因
-                launchBtn.isDisable = choices.isEmpty()
-                setStatus(
-                    if (choices.isEmpty()) "未检测到已安装的游戏版本，请先安装一个版本"
-                    else "就绪"
-                )
-            }
-        }.apply { isDaemon = true }.start()
+            }.apply { isDaemon = true; name = "version-scan" }.start()
+        }
+
+        rescan(first = true)
+
+        // 装完一个版本 → 首页那个下拉里自己多出这一项（选择不动：想玩新版本自己点一下）
+        DownloadCenter.onJobFinished { Platform.runLater { rescan(first = false) } }
     }
 
     /**
@@ -417,9 +485,7 @@ class App : Application() {
 
     private fun fieldGroup(labelText: String, control: Control): VBox {
         return VBox(
-            Label(labelText).apply {
-                style = "-fx-font-size: 13px; -fx-text-fill: #555555;"
-            },
+            Label(labelText).apply { style = Typo.LABEL },
             control
         ).apply {
             spacing = 6.0
@@ -427,6 +493,11 @@ class App : Application() {
     }
 
     private companion object {
+
+        /** 窗口最小尺寸按**内容区**算；外面的自绘标题栏另算。 */
+        const val MIN_CONTENT_WIDTH = 660.0
+        const val MIN_CONTENT_HEIGHT = 560.0
+
         /** 版本还没扫完时下拉里的占位文字。 */
         const val SCANNING = "（扫描中…）"
 

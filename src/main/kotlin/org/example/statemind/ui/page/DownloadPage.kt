@@ -6,8 +6,10 @@ import javafx.scene.Node
 import javafx.scene.layout.Priority
 import javafx.scene.layout.StackPane
 import javafx.scene.layout.VBox
+import org.example.statemind.core.BackendUtil
 import org.example.statemind.core.Prefs
 import org.example.statemind.core.RemoteVersion
+import org.example.statemind.core.download.DownloadCenter
 import org.example.statemind.core.VersionEntry
 import org.example.statemind.ui.Page
 import org.example.statemind.ui.page.download.DownloadStyles
@@ -16,7 +18,7 @@ import org.example.statemind.ui.page.download.VersionHero
 import org.example.statemind.ui.page.download.VersionInstallView
 import org.example.statemind.ui.page.download.VersionListView
 
-class DownloadPage : Page {
+class DownloadPage(private val onOpenTasks: () -> Unit = {}) : Page {
 
     override val id = "download"
     override val title = "下载"
@@ -94,7 +96,10 @@ class DownloadPage : Page {
         listRoot?.isVisible = true
     }
 
-    /** 空实现。下载器是下一轮的事。 */
+    /** 「开始下载」：登记一个下载任务，然后跳到任务页看进度。 */
     private fun startDownload() {
+        val entry = install.current ?: return
+        DownloadCenter.submit(entry, BackendUtil.minecraftDir, Prefs.fileSource)
+        onOpenTasks()
     }
 }

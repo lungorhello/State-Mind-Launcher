@@ -33,7 +33,7 @@ class NavBar(
         // 宽度是定值：StackPane / HBox 会按 maxWidth 把它撑满
         if (!compact) maxWidth = prefWidth
 
-        pages.forEach { page ->
+        pages.filter { it.showInNav }.forEach { page ->
             // 二级导航已经很窄，再加图标就挤了
             val icon = if (compact) null else NavIcons.byPage(page.id, ICON_SIZE, IDLE_ICON)
 

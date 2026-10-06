@@ -16,6 +16,7 @@ import org.example.statemind.core.BackendUtil.JavaInfo
 import org.example.statemind.core.JavaStore
 import org.example.statemind.core.LaunchSelection
 import org.example.statemind.ui.Page
+import org.example.statemind.ui.Typo
 import org.example.statemind.ui.helpMark
 
 /**
@@ -92,14 +93,10 @@ class SettingLaunchPage : Page {
 
     override fun build(): Node {
         // ── 小标题 ────────────────────────────────────────────────────────
-        val heading = Label("Java虚拟机").apply {
-            style = "-fx-font-size: 15px; -fx-font-weight: bold; -fx-text-fill: #1f1f22;"
-        }
+        val heading = Label("Java虚拟机").apply { style = Typo.HEADING }
 
         // ── 自动选择：一行「标题 + ? + 开关」 ──────────────────────────────
-        val autoTitle = Label("自动选择 Java 版本").apply {
-            style = "-fx-font-size: 14px; -fx-text-fill: #1f1f22;"
-        }
+        val autoTitle = Label("自动选择 Java 版本").apply { style = Typo.LABEL }
         toggle.selectedProperty().addListener { _, _, now -> JavaStore.auto = now }
         val autoRow = HBox(
             10.0,
@@ -110,12 +107,8 @@ class SettingLaunchPage : Page {
         ).apply { alignment = Pos.CENTER_LEFT }
 
         // ── 手动指定 ──────────────────────────────────────────────────────
-        val javaTitle = Label("Java 版本").apply {
-            style = "-fx-font-size: 14px; -fx-text-fill: #1f1f22;"
-        }
-        val javaNote = Label("在自动选择关闭后全局生效").apply {
-            style = "-fx-font-size: 12px; -fx-text-fill: #9a9aa0;"
-        }
+        val javaTitle = Label("Java 版本").apply { style = Typo.LABEL }
+        val javaNote = Label("在自动选择关闭后全局生效").apply { style = Typo.NOTE }
         val javaHeader = HBox(9.0, javaTitle, javaNote).apply { alignment = Pos.BASELINE_LEFT }
 
         combo.apply {
@@ -153,7 +146,8 @@ class SettingLaunchPage : Page {
 
         if (!wired) {
             wired = true
-            JavaStore.onChange { sync() }     // 扫描完成 / 开关切换都会回到这里刷界面
+            JavaStore.onChange { sync() }          // 扫描完成 / 开关切换都会回到这里刷界面
+            LaunchSelection.onChange { sync() }    // 首页换版本 → 「将使用 Java x.y.z」跟着变
         }
         sync()
         return root

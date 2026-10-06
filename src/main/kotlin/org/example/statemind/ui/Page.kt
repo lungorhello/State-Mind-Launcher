@@ -13,6 +13,9 @@ interface Page {
 
     val title: String
 
+    /** 是否出现在左侧主导航里。任务页这种「随手看一眼」的页面不走导航，只能由别处打开。 */
+    val showInNav: Boolean get() = true
+
     /** 只在首次打开时调用，且一定在 JavaFX 线程上。 */
     fun build(): Node
 

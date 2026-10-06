@@ -24,6 +24,10 @@ internal class VersionInstallView(
     private val versionLabel = Label()
     private val sourceNote = Label()
 
+    /** 这一页正在准备下载哪个版本。 */
+    var current: VersionEntry? = null
+        private set
+
     init {
         padding = Insets(DownloadStyles.PAGE_PADDING)
 
@@ -53,6 +57,7 @@ internal class VersionInstallView(
     }
 
     fun show(entry: VersionEntry) {
+        current = entry
         versionLabel.text = entry.id
     }
 
