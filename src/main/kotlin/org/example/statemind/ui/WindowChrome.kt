@@ -91,7 +91,7 @@ object WindowChrome {
      * [TitleBar.tasksActive] 回填 —— 本对象不自己记，页面切换只有一处真相。
      */
     fun titleBar(stage: Stage, onToggleTasks: () -> Unit): TitleBar {
-        val icon = NavIcons.byPage("download", 17.0, IDLE_GLYPH)
+        val icon = NavIcons.byPage("task", 17.0, IDLE_GLYPH)
         val box = icon?.node ?: StackPane()
 
         var hovered = false
@@ -100,15 +100,15 @@ object WindowChrome {
 
         fun paint() {
             tasks.style = buttonStyle(hovered || active, if (active) ACTIVE_BG else HOVER_BG)
-            icon?.shape?.fill = if (hovered || active) ACCENT_TEXT else IDLE_GLYPH
+            icon?.color = if (hovered || active) ACCENT_TEXT else IDLE_GLYPH
         }
 
         tasks.apply {
             tooltip = Tooltip("下载任务")
-            prefWidth = BUTTON_WIDTH
-            prefHeight = BUTTON_HEIGHT
-            minWidth = BUTTON_WIDTH
-            minHeight = BUTTON_HEIGHT
+            prefWidth = BUTTON_SIZE
+            prefHeight = BUTTON_SIZE
+            minWidth = BUTTON_SIZE
+            minHeight = BUTTON_SIZE
             setOnAction { onToggleTasks() }
             setOnMouseEntered { hovered = true; paint() }
             setOnMouseExited { hovered = false; paint() }
@@ -256,10 +256,10 @@ object WindowChrome {
         val box = StackPane(Group(*shapes.toTypedArray())).apply { isMouseTransparent = true }
         return Button("", box).apply {
             tooltip = Tooltip(tip)
-            prefWidth = BUTTON_WIDTH
-            prefHeight = BUTTON_HEIGHT
-            minWidth = BUTTON_WIDTH
-            minHeight = BUTTON_HEIGHT
+            prefWidth = BUTTON_SIZE
+            prefHeight = BUTTON_SIZE
+            minWidth = BUTTON_SIZE
+            minHeight = BUTTON_SIZE
             style = buttonStyle(false, hoverBackground)
             setOnAction { action() }
             setOnMouseEntered {
@@ -280,7 +280,7 @@ object WindowChrome {
 
     private fun buttonStyle(hover: Boolean, hoverBackground: String): String =
         "-fx-background-color: " + (if (hover) hoverBackground else "transparent") + ";" +
-                "-fx-background-radius: 6; -fx-padding: 0; -fx-cursor: hand;" +
+                "-fx-background-radius: $BUTTON_RADIUS; -fx-padding: 0; -fx-cursor: hand;" +
                 "-fx-focus-color: transparent; -fx-faint-focus-color: transparent;"
 
     private enum class Dir { NONE, N, S, W, E, NE, NW, SE, SW }
@@ -316,10 +316,20 @@ object WindowChrome {
     }
 
     private const val LOGO_HEIGHT = 26.0
-    private const val BUTTON_WIDTH = 34.0
-    private const val BUTTON_HEIGHT = 28.0
+
+    /**
+     * 标题栏按钮是**正方形**：任务、最小化、关闭三个用同一档尺寸。
+     * 标题栏高 42，所以上下各留 5px。
+     */
+    private const val BUTTON_SIZE = 32.0
+
+    /** 圆角取边长的 25%（32 → 8），和「正方圆矩」的观感一致。CSS 里直接当字符串用。 */
+    private const val BUTTON_RADIUS = "8"
+
     private const val HOVER_BG = "#f1f1f3"
-    private const val CLOSE_BG = "#e81123"
+
+    /** 关闭按钮悬停时的底。刻意不用 Windows 那个正红 #e81123 —— 太扎眼，这档砖红和整条标题栏更搭。 */
+    private const val CLOSE_BG = "#C05050"
 
     /** 任务按钮「开着」时的底色，与左侧导航选中态同一档。 */
     private const val ACTIVE_BG = Theme.ACCENT_BG
