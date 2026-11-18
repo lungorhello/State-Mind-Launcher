@@ -19,10 +19,17 @@ import org.gradle.jvm.toolchain.JavaToolchainService
 val distAppName = "State Mind Launcher"
 
 /**
- * 发布版本号。**必须是 x.y.z 三段数字**（MSI 的硬要求，不能带 -SNAPSHOT）。
+ * MSI 内部版本号 —— **只能是数字**，Windows 拿它比大小决定「新装的是不是更新的」。
+ * `x.y.z` 三段或 `x.y.z.b` 四段都行（实测四段 jpackage + WiX 5 接受并原样保留）。
  * 与 build.gradle.kts 里的 `version` 无关：那个只是 Gradle 内部版本，这个才是发布号。
  */
-val distAppVersion = "0.2.6.0"
+val distAppVersion = "0.3.0.1"
+
+/**
+ * 给人看的版本号。可以有 `-pre1` 这类后缀 —— 它**不进 MSI**（MSI 装不下），
+ * 只用在 ZIP 文件名和便携版说明里，所以预发布版也能一眼看出是哪个。
+ */
+val distDisplayVersion = "0.3.0-pre2"
 
 val distMainClass = "org.example.statemind.MainKt"
 
@@ -120,11 +127,11 @@ val distStagePortable = tasks.register<Sync>("stagePortable") {
     into(distPortableDir)
 
     // README-便携版.txt 里的版本号写成 @VERSION@ 占位符，拷进来之后替换成真实值。
-    // 以前这里写死版本号，发版时忘了改，包里的说明就比实际版本旧一号。
+    // 这里用 distDisplayVersion（可以带 -pre1），不是塞进 MSI 的那个纯数字版本。
     doLast {
         val readme = File(distPortableDir.get().asFile, "README-便携版.txt")
         if (readme.isFile) {
-            readme.writeText(readme.readText().replace("@VERSION@", distAppVersion))
+            readme.writeText(readme.readText().replace("@VERSION@", distDisplayVersion))
         }
     }
 }
@@ -133,10 +140,10 @@ tasks.register<Zip>("packagePortableZip") {
     group = "distribution"
     description = "打出便携 ZIP（解压即用，数据留在包内的 data\\）"
     dependsOn(distStagePortable)
-    archiveFileName.set("State-Mind-Launcher-$distAppVersion-portable.zip")
+    archiveFileName.set("State-Mind-Launcher-$distDisplayVersion-portable.zip")
     destinationDirectory.set(distOutDir)
     // 套一层同名目录，避免解压时把几百个文件直接撒在桌面上
-    from(distPortableDir) { into("State-Mind-Launcher-$distAppVersion") }
+    from(distPortableDir) { into("State-Mind-Launcher-$distDisplayVersion") }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
