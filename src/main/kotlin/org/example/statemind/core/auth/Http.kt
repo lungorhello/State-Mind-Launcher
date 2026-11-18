@@ -33,12 +33,18 @@ internal object Http {
     }
 
     fun get(url: String, timeoutSeconds: Long = 15): Response =
-        send(HttpRequest.newBuilder(URI.create(url))
+        get(url, emptyMap(), timeoutSeconds)
+
+    /** 带自定义请求头的 GET（CurseForge 的 `x-api-key` 就走这条）。 */
+    fun get(url: String, headers: Map<String, String>, timeoutSeconds: Long = 15): Response {
+        val builder = HttpRequest.newBuilder(URI.create(url))
             .timeout(Duration.ofSeconds(timeoutSeconds))
             .header("User-Agent", USER_AGENT)
             .header("Accept", "application/json")
             .GET()
-            .build())
+        headers.forEach { (name, value) -> builder.header(name, value) }
+        return send(builder.build())
+    }
 
     fun postJson(url: String, json: String, timeoutSeconds: Long = 15): Response =
         send(HttpRequest.newBuilder(URI.create(url))
