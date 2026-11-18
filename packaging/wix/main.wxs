@@ -81,21 +81,40 @@
 
     <!--
       ════════════════════════════════════════════════════════════════════════
-       StateMind 定制：卸载时可以顺带删掉游戏数据
+       StateMind 定制：卸载时可以顺带删掉数据
       ════════════════════════════════════════════════════════════════════════
 
-      REMOVE_MINECRAFT 由自定义卸载对话框里的勾选框写入（0 = 保留，1 = 删除）。
-      Secure="yes" 让它能穿过 UI → Execute 序列，被下面的延迟自定义动作读到。
+      两个属性各管一摊，由自定义卸载对话框里的勾选框写入（空 = 保留，1 = 删除）。
+      Secure="yes" 让它们能穿过 UI → Execute 序列，被下面的延迟自定义动作读到：
 
-      删除本身走 WiX 官方 util 扩展的 WixQuietExec：它执行一条命令行、
-      并且**不弹黑框**。用 rmdir 而不是自写脚本，失败也不影响卸载完成
-      （Return="ignore"），最坏情况只是没删干净。
+        JP_REMOVE_CONFIG  设置与账号 —— StateMind 文件夹里**除 .minecraft 之外**的东西
+                          （settings.properties、accounts.txt、auth.json、gamedirs.txt、
+                            Java 列表、authlib-injector.jar …）
+        JP_REMOVE_GAME    游戏文件 —— StateMind 文件夹里的 .minecraft
+                          （版本、模组、存档、资源包）
+
+      两者都只管 **%APPDATA%\StateMind 这一个文件夹**：
+      用户若在设置里把游戏目录改到了别处，那个目录不归我们管、绝不碰。
+
+      删除走 WiX 官方 util 扩展的 WixQuietExec：执行一条命令行、**不弹黑框**。
+      两条动作都 Return="ignore" —— 删不掉也不该让整个卸载失败，最坏只是没删干净。
+
+      「删设置」那条用 PowerShell 而不是 rmdir，是因为要「删掉这个文件夹里除 .minecraft
+      之外的一切」：交给 cmd 就得把每个文件名数出来，以后新增一个配置文件就会被漏掉。
+      末尾那句不带 -Recurse 的 Remove-Item 只删**空目录**，所以留着游戏文件时
+      文件夹原地保留 —— 正是想要的。
     -->
-    <ns0:Property Id="REMOVE_MINECRAFT" Value="0" Secure="yes"></ns0:Property>
+    <ns0:Property Id="JP_REMOVE_CONFIG" Value="0" Secure="yes"></ns0:Property>
+    <ns0:Property Id="JP_REMOVE_GAME" Value="0" Secure="yes"></ns0:Property>
 
-    <ns0:CustomAction Id="JpSetRemoveMinecraftCmd" Property="JpRemoveMinecraftCmd" Execute="immediate"
+    <ns0:CustomAction Id="JpSetRemoveGameCmd" Property="JpRemoveGameCmd" Execute="immediate"
                       Value="&quot;[SystemFolder]cmd.exe&quot; /c rmdir /s /q &quot;[AppDataFolder]StateMind\.minecraft&quot;"></ns0:CustomAction>
-    <ns0:CustomAction Id="JpRemoveMinecraftCmd" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec"
+    <ns0:CustomAction Id="JpRemoveGameCmd" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec"
+                      Execute="deferred" Impersonate="yes" Return="ignore"></ns0:CustomAction>
+
+    <ns0:CustomAction Id="JpSetRemoveConfigCmd" Property="JpRemoveConfigCmd" Execute="immediate"
+                      Value="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;Get-ChildItem -LiteralPath '[AppDataFolder]StateMind' -Force | Where-Object { $_.Name -ne '.minecraft' } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath '[AppDataFolder]StateMind' -ErrorAction SilentlyContinue&quot;"></ns0:CustomAction>
+    <ns0:CustomAction Id="JpRemoveConfigCmd" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec"
                       Execute="deferred" Impersonate="yes" Return="ignore"></ns0:CustomAction>
 
     <ns0:UIRef Id="JpRemoveDataUI"></ns0:UIRef>
@@ -125,12 +144,18 @@
       <ns0:RemoveExistingProducts Before="CostInitialize"></ns0:RemoveExistingProducts>
       <ns0:Custom Action="JpFindRelatedProducts" After="FindRelatedProducts"></ns0:Custom>
 
-      <!-- 只有「真卸载」且用户勾了勾选框才删数据；修安装(REPAIR)、改安装、以及
-           升级时静默移除旧版都不会触发（那时对话框根本没出现，属性还是 0）。 -->
-      <ns0:Custom Action="JpSetRemoveMinecraftCmd" Before="JpRemoveMinecraftCmd"
-                  Condition="REMOVE_MINECRAFT=&quot;1&quot; AND REMOVE~=&quot;ALL&quot;"></ns0:Custom>
-      <ns0:Custom Action="JpRemoveMinecraftCmd" After="RemoveFiles"
-                  Condition="REMOVE_MINECRAFT=&quot;1&quot; AND REMOVE~=&quot;ALL&quot;"></ns0:Custom>
+      <!-- 只有「真卸载」且用户在对话框里勾了相应项才删；修安装(REPAIR)、改安装、以及
+           升级时静默移除旧版都不会触发（那时对话框根本没出现，两个属性还是 0）。
+           顺序要紧：先删游戏文件，再删设置 —— 两条都勾时，StateMind 文件夹会先变空，
+           末尾那个只删空目录的 Remove-Item 才能把文件夹本身一并收走。 -->
+      <ns0:Custom Action="JpSetRemoveGameCmd" Before="JpRemoveGameCmd"
+                  Condition="JP_REMOVE_GAME=&quot;1&quot; AND REMOVE~=&quot;ALL&quot;"></ns0:Custom>
+      <ns0:Custom Action="JpRemoveGameCmd" After="RemoveFiles"
+                  Condition="JP_REMOVE_GAME=&quot;1&quot; AND REMOVE~=&quot;ALL&quot;"></ns0:Custom>
+      <ns0:Custom Action="JpSetRemoveConfigCmd" Before="JpRemoveConfigCmd"
+                  Condition="JP_REMOVE_CONFIG=&quot;1&quot; AND REMOVE~=&quot;ALL&quot;"></ns0:Custom>
+      <ns0:Custom Action="JpRemoveConfigCmd" After="JpRemoveGameCmd"
+                  Condition="JP_REMOVE_CONFIG=&quot;1&quot; AND REMOVE~=&quot;ALL&quot;"></ns0:Custom>
     </ns0:InstallExecuteSequence>
 
     <ns0:InstallUISequence>
@@ -178,18 +203,24 @@
         <ns0:Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="15"
                      Text="{\WixUI_Font_Title}卸载 [ProductName]" Transparent="yes" NoPrefix="yes" TabSkip="yes"></ns0:Control>
         <ns0:Control Id="Description" Type="Text" X="25" Y="23" Width="340" Height="20"
-                     Text="是否同时删除游戏数据。" Transparent="yes" NoPrefix="yes" TabSkip="yes"></ns0:Control>
+                     Text="选择是否一并清理数据。" Transparent="yes" NoPrefix="yes" TabSkip="yes"></ns0:Control>
 
         <ns0:Control Id="QuestionText" Type="Text" X="25" Y="62" Width="320" Height="16"
-                     Text="卸载后，游戏版本、模组、存档、" NoPrefix="yes" TabSkip="yes"></ns0:Control>
+                     Text="卸载只移除启动器本身，数据默认保留。" NoPrefix="yes" TabSkip="yes"></ns0:Control>
         <ns0:Control Id="NoteText1" Type="Text" X="25" Y="82" Width="320" Height="16"
-                     Text="资源包都会一起消失，且无法恢复。" NoPrefix="yes" TabSkip="yes"></ns0:Control>
-        <ns0:Control Id="NoteText2" Type="Text" X="25" Y="104" Width="320" Height="16"
-                     Text="不勾选则只卸载启动器本身，数据保留。" NoPrefix="yes" TabSkip="yes"></ns0:Control>
+                     Text="需要一并清理的，勾选下面相应的项。" NoPrefix="yes" TabSkip="yes"></ns0:Control>
+        <ns0:Control Id="NoteText2" Type="Text" X="25" Y="102" Width="320" Height="16"
+                     Text="删除后无法恢复。" NoPrefix="yes" TabSkip="yes"></ns0:Control>
 
-        <ns0:Control Id="DeleteDataCheck" Type="CheckBox" X="25" Y="140" Width="320" Height="18"
-                     Property="REMOVE_MINECRAFT" CheckBoxValue="1"
-                     Text="同时删除 .minecraft 文件夹" TabSkip="no"></ns0:Control>
+        <ns0:Control Id="RemoveConfigCheck" Type="CheckBox" X="25" Y="128" Width="320" Height="18"
+                     Property="JP_REMOVE_CONFIG" CheckBoxValue="1"
+                     Text="删除启动器设置与账号（登录凭证、Java 列表）" TabSkip="no"></ns0:Control>
+
+        <ns0:Control Id="RemoveGameCheck" Type="CheckBox" X="25" Y="150" Width="320" Height="18"
+                     Property="JP_REMOVE_GAME" CheckBoxValue="1"
+                     Text="删除游戏文件（版本、模组、存档）" TabSkip="no"></ns0:Control>
+        <ns0:Control Id="RemoveGameNote" Type="Text" X="37" Y="168" Width="310" Height="16"
+                     Text="游戏文件可能很大，删除后需要重新下载。" NoPrefix="yes" TabSkip="yes"></ns0:Control>
 
         <ns0:Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
                      Text="!(loc.WixUIBack)" TabSkip="no"></ns0:Control>
