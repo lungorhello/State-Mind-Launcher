@@ -92,19 +92,24 @@ class App : Application() {
 
         // 启动表单。（Java 与玩家名都不在这里了：Java 在「设置 · 启动」，
         // 玩家名取「设置 · 玩家」里的当前账号，见 doLaunch）
+        // 启动表单是一张白卡，压在统一的页面底色上（底色见 Theme.PAGE_BG）。
+        // 以前它是块撑满整页的淡灰面板，别的页却是白的 —— 那就是「首页淡灰、别的不灰」的来源。
         val leftPanel = VBox(
             fieldGroup("游戏版本", gameVersion),
-            Region().apply { VBox.setVgrow(this, Priority.ALWAYS) },
             launchBtn,
             status
         ).apply {
             spacing = 14.0
-            padding = Insets(16.0)
-            prefWidth = 260.0
+            padding = Insets(20.0)
+            prefWidth = 340.0
+            maxWidth = 340.0
+            maxHeight = Region.USE_PREF_SIZE
             style = """
-                -fx-background-color: #f4f5f7;
-                -fx-border-color: #e2e4e8;
-                -fx-border-width: 0 1 0 0;
+                -fx-background-color: #ffffff;
+                -fx-border-color: #d9d9de;
+                -fx-border-width: 1;
+                -fx-border-radius: 10;
+                -fx-background-radius: 10;
             """
         }
 
@@ -120,7 +125,11 @@ class App : Application() {
             HelpPage(),
             TaskPage()
         )
-        val pageHost = PageHost(pages)
+        // 页面区的底色只在这里给一次：各页都是透明的，卡片才是白的。
+        // 页面自己刷底色的话，切页时就会出现一块灰、一块白。
+        val pageHost = PageHost(pages).apply {
+            style = "-fx-background-color: ${Theme.PAGE_BG};"
+        }
 
         /** 从任务页退回来时落在哪一页 —— 永远记着最近一个「不是任务页」的页面。 */
         var lastPage = pages.first().id
@@ -131,7 +140,7 @@ class App : Application() {
             if (pageHost.currentPage?.id == TaskPage.ID) pageHost.open(lastPage) else showTasks()
         }
 
-        // 切页只同步选中态 —— 导航栏宽度固定，不再为二级 tab 收窄（84 已经够窄了）。
+        // 切页只同步选中态 —— 导航栏宽度固定，不再为二级 tab 收窄（70 已经够窄了）。
         // 顺便记下退回目标、点亮标题栏那个按钮：当前在不在任务页，只有这一处判断
         pageHost.onPageChanged = { id ->
             navBar.select(id)
@@ -150,7 +159,7 @@ class App : Application() {
         Dialogs.install(overlay)
 
         // 窗口可以放大，但不能拖得太小：再小左导航 + 二级 tab 就把内容区挤没了。
-        // 660 = 84(主导航) + 96(二级 tab) + 480(内容区，够放下玩家页那张横幅卡片和三个按钮)；
+        // 660 = 70(主导航，按钮 54×54 正方形) + 150(二级 tab) + 440(内容区，够放下玩家页那张横幅卡片和三个按钮)；
         // 560 = 首页表单 + 「设置 · 启动」那种卡片页的舒适下限。想放宽/收紧就改这两个数。
         // 自绘标题栏、圆角投影外的一圈留白都另占地方，最小值要加回去，内容区才不会被压小
         val margin = WindowChrome.SHADOW_MARGIN * 2
