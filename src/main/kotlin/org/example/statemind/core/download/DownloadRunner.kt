@@ -12,6 +12,7 @@ import org.example.statemind.core.FileSource
 import org.example.statemind.core.MiniJson
 import org.example.statemind.core.Prefs
 import org.example.statemind.core.VersionEntry
+import org.example.statemind.core.loader.LoaderChoice
 
 /**
  * 执行一份 [DownloadPlan]：先算、后下，多线程按 [Prefs] 的线程数跑，整机限速走同一个令牌桶。
@@ -22,12 +23,18 @@ internal object DownloadRunner {
 
     private const val PUBLISH_MS = 250L
 
-    fun run(job: DownloadJob, entry: VersionEntry, root: File, source: FileSource) {
+    fun run(
+        job: DownloadJob,
+        entry: VersionEntry,
+        root: File,
+        source: FileSource,
+        loader: LoaderChoice? = null
+    ) {
         job.state = DownloadJob.State.PREPARING
         job.note = "准备中…"
         DownloadCenter.notifyChanged()
 
-        val plan = DownloadPlanner.plan(entry, root, source) { note ->
+        val plan = DownloadPlanner.plan(entry, root, source, loader) { note ->
             job.note = note
             DownloadCenter.notifyChanged()
         }
