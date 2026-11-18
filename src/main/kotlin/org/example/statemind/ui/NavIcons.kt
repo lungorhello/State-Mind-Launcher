@@ -4,20 +4,47 @@ import javafx.scene.Group
 import javafx.scene.layout.StackPane
 import javafx.scene.paint.Color
 import javafx.scene.shape.SVGPath
+import javafx.scene.shape.StrokeLineCap
+import javafx.scene.shape.StrokeLineJoin
 import javafx.scene.transform.Affine
 
 /**
- * 主导航图标：图形是从「游戏图标包 v1.4」的 SVG 里提出来的矢量路径（`d` + 各自的 viewBox），
- * 用 [SVGPath] 画 —— 缩放不糊，填充色也能跟着选中态变。
+ * 界面图标：图形是从 SVG 里提出来的矢量路径（`d` + 各自的 viewBox），用 [SVGPath] 画 ——
+ * 缩放不糊，颜色也能跟着选中态变。
  *
- * 图标包的 viewBox 是紧凑包围盒、每个都不一样，所以画的时候要按各自的 viewBox 缩放平移。
+ * 两路画法，靠 [Data.strokeWidth] 区分：
+ * - **填充型**（「游戏图标包 v1.4」，左侧主导航在用的那套）：路径围出的实心块，颜色走 `fill`；
+ * - **描边型**（lucide 那类线性图标）：画的是线本身，颜色走 `stroke`。
+ *
+ * 调用方不必知道手里是哪种 —— 换色只走 [Icon.color]。
+ *
+ * 图标的 viewBox 各不相同（图标包是紧凑包围盒、线性图标是 24 网格），
+ * 所以画的时候要按各自的 viewBox 缩放平移。
  */
 internal object NavIcons {
 
-    private class Data(val d: String, val x: Double, val y: Double, val w: Double, val h: Double)
+    /**
+     * [strokeWidth] 为 null 表示填充型；否则是描边宽度 —— 单位是 **viewBox**，
+     * 会跟着 [Affine] 一起缩放，所以同一个图标在不同尺寸下粗细比例一致。
+     */
+    private class Data(
+        val d: String,
+        val x: Double,
+        val y: Double,
+        val w: Double,
+        val h: Double,
+        val strokeWidth: Double? = null
+    )
 
-    /** [shape] 留着随选中态换色。 */
-    class Icon(val node: StackPane, val shape: SVGPath)
+    /** [color] 是唯一的换色入口，按填充/描边自己分派 —— 外面别去碰内部的 [SVGPath]。 */
+    class Icon(val node: StackPane, private val path: SVGPath, private val stroked: Boolean) {
+
+        var color: Color
+            get() = (if (stroked) path.stroke else path.fill) as Color
+            set(value) {
+                if (stroked) path.stroke = value else path.fill = value
+            }
+    }
 
     /** home（界面.svg） */
     private val HOME = Data(
@@ -43,6 +70,20 @@ internal object NavIcons {
         2.00, 2.00, 6.00, 6.00
     )
 
+    /**
+     * task（lucide `arrow-down-to-line`）：描边型，24 网格、线宽 2、圆头圆角。
+     * 标题栏的下载任务入口用它（见 [WindowChrome.titleBar]）—— 那里两侧的最小化、关闭
+     * 本来就是圆头线条，摆一起是一路的；而左侧导航那套是填充型，所以下载页仍用自己的图标。
+     *
+     * 三段子路径：竖线、V 形箭头、底线。原图标第二段是相对坐标（`m6 11 6 6 6-6`），
+     * 合并成一条路径时换成了等价的绝对写法，免得前一段的落点影响它。
+     */
+    private val TASK = Data(
+        "M12 17V3M6 11L12 17L18 11M19 21H5",
+        0.0, 0.0, 24.0, 24.0,
+        strokeWidth = 2.0
+    )
+
     /** 返回 null 表示这个页面没配图标（按钮退化成纯文字）。 */
     fun byPage(pageId: String, size: Double, color: Color): Icon? {
         val data = when (pageId) {
@@ -50,12 +91,23 @@ internal object NavIcons {
             "download" -> DOWNLOAD
             "setting" -> SETTING
             "help" -> EXPLORE
+            "task" -> TASK
             else -> return null
         }
 
+        val strokeWidth = data.strokeWidth
         val path = SVGPath().apply {
             content = data.d
-            fill = color
+            if (strokeWidth == null) {
+                fill = color
+            } else {
+                // 不显式置空的话 SVGPath 会默认填黑，线条图标会糊成一团色块
+                fill = null
+                stroke = color
+                this.strokeWidth = strokeWidth
+                strokeLineCap = StrokeLineCap.ROUND
+                strokeLineJoin = StrokeLineJoin.ROUND
+            }
             // 按自己的 viewBox 缩放到 [size] 见方并挪到原点：x' = s·(x - minX)
             val s = size / maxOf(data.w, data.h)
             transforms.setAll(Affine(s, 0.0, -data.x * s, 0.0, s, -data.y * s))
@@ -73,6 +125,6 @@ internal object NavIcons {
             maxHeight = size
             isMouseTransparent = true        // 点图标就是点按钮，别让它抢事件
         }
-        return Icon(box, path)
+        return Icon(box, path, strokeWidth != null)
     }
 }
