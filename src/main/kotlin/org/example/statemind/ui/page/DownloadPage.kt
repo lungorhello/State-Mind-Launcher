@@ -99,7 +99,7 @@ class DownloadPage(private val onOpenTasks: () -> Unit = {}) : Page {
     /** 「开始下载」：登记一个下载任务，然后跳到任务页看进度。 */
     private fun startDownload() {
         val entry = install.current ?: return
-        DownloadCenter.submit(entry, BackendUtil.minecraftDir, Prefs.fileSource)
+        DownloadCenter.submit(entry, BackendUtil.minecraftDir, Prefs.fileSource, install.choice)
         onOpenTasks()
     }
 }
