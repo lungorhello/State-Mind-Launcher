@@ -137,6 +137,18 @@ object VersionJson {
     }
 
     /**
+     * 只有 maven 坐标、没有 `downloads` 的库从哪儿下（Fabric / Quilt 的库全是这种）。
+     *
+     * `url` 是仓库根，拼上 [libraryPath] 推出来的相对路径即可；没写 `url` 的按 Maven Central 走。
+     * 返回 null 表示这条库既没有地址也算不出坐标。
+     */
+    fun mavenUrl(lib: Map<*, *>): String? {
+        val path = libraryPath(lib) ?: return null
+        val base = (lib["url"] as? String)?.takeIf { it.isNotBlank() } ?: MAVEN_CENTRAL
+        return base.trimEnd('/') + "/" + path
+    }
+
+    /**
      * 取 natives 压缩包路径。
      * 老格式（1.12 及以前）：靠 natives 字段挑系统，真实包在 downloads.classifiers 里；
      * 新格式（1.19+ / Fabric）：分类符直接写进 name，如 org.lwjgl:lwjgl:3.3.2:natives-windows。
@@ -221,4 +233,6 @@ object VersionJson {
             else -> false
         }
     }
+
+    private const val MAVEN_CENTRAL = "https://repo1.maven.org/maven2"
 }
