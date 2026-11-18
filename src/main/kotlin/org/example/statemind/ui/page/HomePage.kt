@@ -1,5 +1,6 @@
 package org.example.statemind.ui.page
 
+import javafx.geometry.Insets
 import javafx.geometry.Pos
 import javafx.scene.Node
 import javafx.scene.control.Label
@@ -13,7 +14,11 @@ class HomePage(private val content: (() -> Node)? = null) : Page {
     override val title = "首页"
 
     override fun build(): Node {
-        content?.let { return it() }
-        return StackPane(Label("首页 · 内容待迁入")).apply { alignment = Pos.CENTER }
+        val inner = content?.invoke() ?: Label("首页 · 内容待迁入")
+        // 留白与其他页一致；卡片自己定宽，别让 StackPane 把它拉满
+        return StackPane(inner).apply {
+            alignment = Pos.TOP_LEFT
+            padding = Insets(20.0)
+        }
     }
 }
