@@ -11,7 +11,8 @@ import javafx.scene.paint.Color
 /**
  * 左侧导航栏（竖排）。点一个标签就打开对应页面。
  *
- * 两种形态：普通（主窗口左侧，84 宽，图标在上文字在下）、[compact]（页面内部二级导航，只有文字，150 宽）。
+ * 两种形态：普通（主窗口左侧，70 宽，按钮是 54×54 正方形，图标在上文字在下）、
+ * [compact]（页面内部二级导航，只有文字，150 宽）。
  * 宽度都是定值，进二级页面也不收窄。
  *
  * 选中状态由 [select] 同步、不自己维护，这样用代码主动跳页时标签也会跟着亮。
@@ -28,10 +29,14 @@ class NavBar(
     private val buttons = LinkedHashMap<String, ToggleButton>()
 
     init {
-        padding = Insets(8.0)
+        padding = Insets(PAD)
         prefWidth = if (compact) COMPACT_WIDTH else NORMAL_WIDTH
         // 宽度是定值：StackPane / HBox 会按 maxWidth 把它撑满
-        if (!compact) maxWidth = prefWidth
+        if (!compact) {
+            maxWidth = prefWidth
+            // 导航栏是白的、页面区是淡灰的，中间给一条细线，边界才立得住
+            style = "-fx-border-color: transparent #e6e6ea transparent transparent; -fx-border-width: 0 1 0 0;"
+        }
 
         pages.filter { it.showInNav }.forEach { page ->
             // 二级导航已经很窄，再加图标就挤了
@@ -56,12 +61,12 @@ class NavBar(
                         graphicTextGap = 3.0
                     }
                     alignment = Pos.CENTER
-                    prefHeight = BUTTON_HEIGHT
+                    prefHeight = BUTTON_SIZE
                     // JavaFX 的内联样式写不了 :selected，只能自己在监听里换样式（图标同理）
                     style = NORMAL_IDLE
                     selectedProperty().addListener { _, _, now ->
                         style = if (now) NORMAL_ON else NORMAL_IDLE
-                        icon?.shape?.fill = if (now) ON_ICON else IDLE_ICON
+                        icon?.color = if (now) ON_ICON else IDLE_ICON
                     }
                 }
 
@@ -82,11 +87,15 @@ class NavBar(
     }
 
     private companion object {
-        /** 按钮吃满「84 − 左右各 8 的内边距」= 68。 */
-        const val NORMAL_WIDTH = 84.0
+        const val PAD = 8.0
+
+        /** 主导航按钮是**正方形**：宽由栏宽减内边距得到，高就是它。 */
+        const val BUTTON_SIZE = 54.0
+
+        /** 栏宽由按钮反推，改按钮大小栏宽自己跟着走 —— 别把 70 写成死数。 */
+        const val NORMAL_WIDTH = BUTTON_SIZE + PAD * 2
         const val COMPACT_WIDTH = 150.0
         const val ICON_SIZE = 20.0
-        const val BUTTON_HEIGHT = 54.0
         const val COMPACT_HEIGHT = 32.0
 
         val IDLE_ICON: Color = Color.web("#52525b")
