@@ -6,6 +6,7 @@ import org.example.statemind.core.FileSource
 import org.example.statemind.core.MiniJson
 import org.example.statemind.core.VersionEntry
 import org.example.statemind.core.VersionJson
+import org.example.statemind.core.loader.LoaderChoice
 import org.example.statemind.core.auth.Http
 
 /** 一个待下载的文件：落到哪儿、按什么顺序试哪些地址、多大、校验值。 */
@@ -49,6 +50,7 @@ object DownloadPlanner {
         entry: VersionEntry,
         root: File,
         source: FileSource,
+        loader: LoaderChoice? = null,
         onNote: (String) -> Unit = {}
     ): DownloadPlan {
         val versionDir = File(root, "versions/${entry.id}")
@@ -87,15 +89,23 @@ object DownloadPlanner {
         onNote("整理依赖库…")
         val skipped = ArrayList<String>()
         val libs = (json["libraries"] as? List<*>)?.filterIsInstance<Map<*, *>>() ?: emptyList()
-        for (lib in libs) {
-            if (!VersionJson.rulesAllow(lib["rules"])) continue
+
+        fun addLibrary(lib: Map<*, *>) {
+            if (!VersionJson.rulesAllow(lib["rules"])) return
             val dl = lib["downloads"] as? Map<*, *>
             val artifact = dl?.get("artifact") as? Map<*, *>
             if (artifact != null) {
                 addArtifact(libDir, artifact, ::add)
             } else if (dl == null) {
-                // Fabric 那类只给 maven 坐标、连地址都没有的库：这轮只做原版，如实记下来
-                (lib["name"] as? String)?.let { skipped += it }
+                // 只给 maven 坐标、没有 downloads 的库（Fabric / Quilt 的库全是这种）：按坐标拼地址
+                val url = VersionJson.mavenUrl(lib)
+                val path = VersionJson.libraryPath(lib)
+                if (url != null && path != null) {
+                    // 这两样只有服务端知道，先按未知处理：下载完以实际字节数为准
+                    add(File(libDir, path), url, 0L, null)
+                } else {
+                    (lib["name"] as? String)?.let { skipped += it }
+                }
             }
             val nativeKey = (lib["natives"] as? Map<*, *>)?.get(VersionJson.osName) as? String
             if (nativeKey != null) {
@@ -103,6 +113,8 @@ object DownloadPlanner {
                 if (classifier != null) addArtifact(libDir, classifier, ::add)
             }
         }
+
+        for (lib in libs) addLibrary(lib)
 
         // ③ 资源索引与资源对象。资源对象只有拿到索引才知道有哪些，所以这里必须先把它读下来
         onNote("读取资源索引…")
@@ -143,6 +155,20 @@ object DownloadPlanner {
         val logId = logFile?.get("id") as? String
         if (logFile != null && !logId.isNullOrBlank()) {
             add(File(assetsDir, "log_configs/$logId"), logFile["url"] as? String, number(logFile["size"]), logFile["sha1"] as? String)
+        }
+
+        // ⑤ 加载器。profile json 直接落进 versions/<加载器 id>/，它自己的库全是 maven 坐标；
+        //    原版部分照旧（json 里 inheritsFrom 指回原版，启动时由 VersionJson.load 串起来）
+        if (loader != null) {
+            onNote("准备${loader.kind.label}…")
+            val loaderDir = File(root, "versions/${loader.id}").apply { mkdirs() }
+            val profileText = fetchText(loader.profileUrl, source)
+            File(loaderDir, "${loader.id}.json").writeText(profileText, Charsets.UTF_8)
+            val profile = MiniJson.parse(profileText) as? Map<*, *>
+                ?: throw IOException("加载器配置不是 JSON 对象")
+            val loaderLibs = (profile["libraries"] as? List<*>)?.filterIsInstance<Map<*, *>>()
+                ?: emptyList()
+            for (lib in loaderLibs) addLibrary(lib)
         }
 
         val list = files.values.toList()
