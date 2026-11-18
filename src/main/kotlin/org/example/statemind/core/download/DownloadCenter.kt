@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import org.example.statemind.core.FileSource
 import org.example.statemind.core.VersionEntry
+import org.example.statemind.core.loader.LoaderChoice
 
 /** 一个下载任务对外的全部状态。字段都是 volatile：下载线程写，界面线程读。 */
 class DownloadJob internal constructor(val id: Long, val versionId: String) {
@@ -80,14 +81,23 @@ object DownloadCenter {
         val job: DownloadJob,
         val entry: VersionEntry,
         val root: File,
-        val source: FileSource
+        val source: FileSource,
+        val loader: LoaderChoice?
     )
 
-    /** 登记一个下载。落点是 [root]（默认就是 StateMind 自带的 `.minecraft`）。 */
-    fun submit(entry: VersionEntry, root: File, source: FileSource): DownloadJob {
-        val job = DownloadJob(counter.incrementAndGet(), entry.id)
+    /**
+     * 登记一个下载。落点是 [root]（默认就是 StateMind 自带的 `.minecraft`）。
+     * 选了加载器时原版与加载器**同一个任务**下 —— 拆成两个任务的话，用户看到两条互不相干的进度。
+     */
+    fun submit(
+        entry: VersionEntry,
+        root: File,
+        source: FileSource,
+        loader: LoaderChoice? = null
+    ): DownloadJob {
+        val job = DownloadJob(counter.incrementAndGet(), loader?.id ?: entry.id)
         list += job
-        queue += Request(job, entry, root, source)
+        queue += Request(job, entry, root, source, loader)
         startWorker()
         notifyChanged()
         return job
@@ -128,7 +138,9 @@ object DownloadCenter {
             worker = Thread({
                 while (true) {
                     val request = runCatching { queue.take() }.getOrNull() ?: continue
-                    runCatching { DownloadRunner.run(request.job, request.entry, request.root, request.source) }
+                    runCatching {
+                        DownloadRunner.run(request.job, request.entry, request.root, request.source, request.loader)
+                    }
                         .onFailure { error ->
                             request.job.state = DownloadJob.State.FAILED
                             request.job.message = error.message ?: error.toString()
