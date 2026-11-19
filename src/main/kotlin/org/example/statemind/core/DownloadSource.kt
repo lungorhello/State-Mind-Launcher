@@ -36,7 +36,10 @@ object BmclapiSource : DownloadSource {
         "https://launchermeta.mojang.com" to BASE,
         "https://launcher.mojang.com" to BASE,
         "https://piston-meta.mojang.com" to BASE,
-        "https://piston-data.mojang.com" to BASE
+        "https://piston-data.mojang.com" to BASE,
+        // Fabric 的 meta 在国内常常连不上（连接超时，不是 4xx），镜像这一条是它能用的前提。
+        // Quilt 的 meta 没有镜像，翻不出来就照原样试。
+        "https://meta.fabricmc.net" to "$BASE/fabric-meta"
     )
 
     private const val BASE = "https://bmclapi2.bangbang93.com"
