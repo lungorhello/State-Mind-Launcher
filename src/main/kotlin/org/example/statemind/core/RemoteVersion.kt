@@ -42,7 +42,7 @@ object RemoteVersion {
 
     private fun fetchFromNetwork(attempt: SourceAttempt): Result {
         val response = Http.get(attempt.source.manifestUrl, attempt.timeoutSeconds)
-        if (response.status !in 200..299) throw IOException("HTTP ${response.status}")
+        if (response.status !in 200..299) throw IOException("获取版本清单失败：${HttpText.of(response.status)}")
         val parsed = parse(response.body, attempt.source)
         writeCache(response.body)
         return parsed
