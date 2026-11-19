@@ -10,6 +10,11 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 object RecentInstall {
 
+    /** `versions/` 下那个文件夹的名字，首页据此把下拉选中到刚装好的这一项。 */
+    @Volatile
+    var versionId: String? = null
+        private set
+
     @Volatile
     var mcVersion: String? = null
         private set
@@ -21,8 +26,9 @@ object RecentInstall {
 
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
 
-    fun remember(mc: String, loader: String?) {
-        if (mc.isBlank()) return
+    fun remember(versionId: String, mc: String, loader: String?) {
+        if (versionId.isBlank() || mc.isBlank()) return
+        this.versionId = versionId
         mcVersion = mc
         loaderLabel = loader
         listeners.forEach { it() }
