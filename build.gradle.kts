@@ -34,6 +34,10 @@ dependencies {
     // Atlantafx 主题（JavaFX 25 友好，未引入 javafxplugin 冲突）
     implementation("io.github.mkpaz:atlantafx-base:2.1.0")
 
+    // Modrinth 的图标全是 webp，而 JavaFX 自带的解码器只认 png/jpeg/gif/bmp ——
+    // 不接这个，所有图标都只会停在灰底。顺带给 JPEG 的冷门变体兜底。
+    implementation("com.twelvemonkeys.imageio:imageio-webp:3.15.3")
+
     testImplementation(kotlin("test"))
 }
 
