@@ -37,12 +37,8 @@ internal class VersionListView(private val onPick: (VersionEntry) -> Unit) : Sta
 
     private val list = ListView<Row>()
 
-    /** 默认只展开正式版。 */
-    private val collapsed = mutableSetOf(
-        VersionGroups.Group.SNAPSHOT,
-        VersionGroups.Group.OLD,
-        VersionGroups.Group.APRIL_FOOLS
-    )
+    /** 默认全部收起：进下载页先看到四个分组标题，想看哪组再点开。 */
+    private val collapsed = VersionGroups.Group.entries.toMutableSet()
 
     private var query = ""
     private var all: List<VersionEntry> = emptyList()
@@ -209,19 +205,24 @@ internal class VersionListView(private val onPick: (VersionEntry) -> Unit) : Sta
         val id = Label(row.entry.id).apply {
             style = "-fx-font-size: 13px; -fx-text-fill: ${DownloadStyles.TEXT};"
         }
-        // 搜索时不看分组标题，标签是当行唯一的类型线索
-        val badge = Label(VersionGroups.groupOf(row.entry).label).apply {
-            style = Typo.NOTE +
-                    "-fx-background-color: #f2f2f5; -fx-background-radius: 4; -fx-padding: 1 6 1 6;"
+        // 愚人节版本号本身看不出名堂，后面跟着它的那句玩笑；其余行的日期已经能说明是哪年的版本，
+        // 分组标题也说过类型了，不再往行里叠第三行小字
+        val blurb = VersionGroups.blurbOf(row.entry.id)
+        val info = VBox(2.0, id).apply { minWidth = 0.0 }
+        if (blurb != null) {
+            info.children += Label("${row.entry.releaseText} · $blurb").apply {
+                style = Typo.NOTE
+                maxWidth = Double.MAX_VALUE
+            }
         }
-        val titleRow = HBox(8.0, id, badge).apply { alignment = Pos.CENTER_LEFT }
-
-        val time = Label(row.entry.releaseText).apply {
-            style = "-fx-font-size: 12px; -fx-text-fill: ${DownloadStyles.TEXT_DIM};"
-            maxWidth = Double.MAX_VALUE
-        }
-        val info = VBox(2.0, titleRow, time).apply { minWidth = 0.0 }
         HBox.setHgrow(info, Priority.ALWAYS)
+
+        val date = Label(row.entry.releaseText).apply {
+            style = Typo.NOTE
+            // 愚人节那行把日期写在下面，右边就不再重复一遍
+            isVisible = blurb == null
+            isManaged = blurb == null
+        }
 
         val divider = Region().apply {
             minHeight = 1.0
@@ -230,7 +231,7 @@ internal class VersionListView(private val onPick: (VersionEntry) -> Unit) : Sta
             style = "-fx-background-color: ${DownloadStyles.CARD_DIVIDER};"
         }
 
-        val content = HBox(info).apply {
+        val content = HBox(12.0, info, date).apply {
             alignment = Pos.CENTER_LEFT
             padding = Insets(10.0, 16.0, 10.0, 16.0)
         }
