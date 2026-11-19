@@ -8,6 +8,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.security.MessageDigest
 import java.time.Duration
+import org.example.statemind.core.HttpText
 
 /** 下载被用户取消。用它和「真的失败」区分开：取消不重试、也不报错。 */
 internal class CancelledException : RuntimeException("已取消")
@@ -39,7 +40,8 @@ internal object Fetcher {
             if (error is CancelledException) throw error
             last = error as? Exception ?: Exception(error)
         }
-        throw IOException(last?.message ?: "下载失败", last)
+        val error = last
+        throw IOException(if (error == null) "下载失败" else HttpText.of(error), error)
     }
 
     private fun once(url: String, item: DownloadItem, onBytes: (Int) -> Unit, cancelled: () -> Boolean) {
@@ -59,7 +61,7 @@ internal object Fetcher {
         )
         if (response.statusCode() !in 200..299) {
             part.delete()
-            throw IOException("HTTP ${response.statusCode()}")
+            throw IOException(HttpText.of(response.statusCode()))
         }
 
         val digest = MessageDigest.getInstance("SHA-1")
