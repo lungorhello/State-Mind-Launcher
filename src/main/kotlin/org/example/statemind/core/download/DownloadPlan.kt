@@ -3,6 +3,7 @@ package org.example.statemind.core.download
 import java.io.File
 import java.io.IOException
 import org.example.statemind.core.FileSource
+import org.example.statemind.core.HttpText
 import org.example.statemind.core.MiniJson
 import org.example.statemind.core.VersionEntry
 import org.example.statemind.core.VersionJson
@@ -204,10 +205,12 @@ object DownloadPlanner {
             if (response.isSuccess && response.getOrNull()?.status in 200..299) {
                 return response.getOrThrow().body
             }
+            val status = response.getOrNull()?.status
             last = response.exceptionOrNull() as? Exception
-                ?: IOException("HTTP ${response.getOrNull()?.status}")
+                ?: IOException(if (status != null) HttpText.of(status) else "读取失败")
         }
-        throw IOException("读取失败：$url", last)
+        val error = last
+        throw IOException(if (error == null) "读取失败" else HttpText.of(error), error)
     }
 
     private fun number(value: Any?): Long = (value as? Number)?.toLong() ?: 0L
