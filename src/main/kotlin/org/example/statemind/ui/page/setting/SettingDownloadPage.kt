@@ -17,13 +17,15 @@ import kotlin.math.roundToInt
 import org.example.statemind.core.DownloadOption
 import org.example.statemind.core.FileSource
 import org.example.statemind.core.Prefs
+import org.example.statemind.core.ResourceNaming
+import org.example.statemind.core.ResourceTarget
 import org.example.statemind.core.VersionListSource
 import org.example.statemind.ui.Page
 import org.example.statemind.ui.Typo
 import org.example.statemind.ui.helpMark
 
 /**
- * 设置 · 下载 —— 文件从哪儿取、怎么取。
+ * 设置 · 下载 —— 文件从哪儿取、怎么取，以及社区资源装到哪。
  *
  * 本页不自己存状态：控件就是 [Prefs] 里那份设置的投影，改一下就落盘，下次进来直接读回来。
  * 滑条在拖动过程中只更新右边的数字，停手 300 ms 才写文件 —— 不然拖一次要写几十遍磁盘。
@@ -59,19 +61,42 @@ class SettingDownloadPage : Page {
                     Prefs.downloadSpeedKbps = it
                 }
             )
-        ).apply {
-            padding = Insets(14.0)
-            style = """
-                -fx-background-color: #ffffff;
-                -fx-border-color: #d9d9de;
-                -fx-border-width: 1;
-                -fx-border-radius: 10;
-                -fx-background-radius: 10;
-            """
-        }
+        ).apply { cardPadding(this) }
 
-        return VBox(14.0, heading, card).apply { padding = Insets(20.0) }
+        val community = VBox(
+            12.0,
+            row(
+                "安装位置",
+                helpMark("模组、资源包、光影装到哪。选「每次下载时选择」时，每次都会弹出系统的目录选择框。数据包另选存档，不受这里影响。"),
+                targetControl()
+            ),
+            divider(),
+            row(
+                "文件名格式",
+                helpMark("社区资源落盘时的文件名。带标题方便在文件夹里认出来。"),
+                sourceBox(ResourceNaming.entries, Prefs.resourceNaming) { Prefs.resourceNaming = it }
+            )
+        ).apply { cardPadding(this) }
+
+        val communityTitle = Label("社区资源").apply { style = Typo.SECTION }
+
+        return VBox(14.0, heading, card, communityTitle, community).apply { padding = Insets(20.0) }
     }
+
+    private fun cardPadding(box: VBox) {
+        box.padding = Insets(14.0)
+        box.style = """
+            -fx-background-color: #ffffff;
+            -fx-border-color: #d9d9de;
+            -fx-border-width: 1;
+            -fx-border-radius: 10;
+            -fx-background-radius: 10;
+        """.trimIndent()
+    }
+
+    /** 「当前选中的版本 / 每次下载时选择」。后者不记目录，每次都现弹系统的选择框。 */
+    private fun targetControl(): ComboBox<ResourceTarget> =
+        sourceBox(ResourceTarget.entries, Prefs.resourceTarget) { Prefs.resourceTarget = it }
 
     private fun row(title: String, tip: Node?, control: Node): HBox {
         val label = Label(title).apply {
