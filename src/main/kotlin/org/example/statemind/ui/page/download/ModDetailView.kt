@@ -29,6 +29,7 @@ import org.example.statemind.core.ResourceTarget
 import org.example.statemind.core.fileNameOf
 import org.example.statemind.core.mod.InstallLog
 import org.example.statemind.core.mod.InstallTargets
+import org.example.statemind.core.mod.McModNames
 import org.example.statemind.core.mod.ModInstaller
 import org.example.statemind.core.mod.ModKind
 import org.example.statemind.core.mod.ModNames
@@ -62,6 +63,9 @@ internal class ModDetailView(
 
     /** 展开着的分组。默认空 = 全部收起，跟 PCL 的版本列表一致。 */
     private val expandedGroups = HashSet<String>()
+
+    /** 这个项目的中文名。内置表命中就是它，否则等 MC 百科查回来再填。 */
+    private var zhName: String? = null
 
     /**
      * 一个「加载器 + 游戏版本」分组。
@@ -200,9 +204,12 @@ internal class ModDetailView(
         renderGeneration++
         val mine = generation
 
-        // 有中文译名就「译名 | 原名」，跟 PCL 一个样子；没有就只显示原名
-        val zh = ModNames.zhOf(hit.slug, hit.title)
-        title.text = if (zh == hit.title) hit.title else "$zh | ${hit.title}"
+        // 有中文译名就「译名 | 原名」，跟 PCL 一个样子；没有就只显示原名。
+        // 内置表先顶一下，表里没有的项目再去 MC 百科问一次，回来补进标题
+        val builtin = ModNames.zhOf(hit.slug, hit.title)
+        zhName = builtin.takeIf { it != hit.title }
+        applyTitle()
+        if (zhName == null) lookupZh(hit, mine)
         meta.text = buildList {
             hit.author.takeIf { it.isNotBlank() }?.let(::add)
             add(downloadsText(hit.downloads))
@@ -499,6 +506,25 @@ internal class ModDetailView(
         }
     }
 
+    // ---------- 中文名 ----------
+
+    private fun applyTitle() {
+        val original = hit?.title ?: return
+        title.text = zhName?.let { "$it | $original" } ?: original
+    }
+
+    /** 内置表没有的项目去 MC 百科查一次；查不到就继续用英文原名。 */
+    private fun lookupZh(project: Modrinth.Hit, mine: Int) {
+        Thread {
+            val zh = McModNames.lookup(project.title) ?: return@Thread
+            Platform.runLater {
+                if (mine != generation) return@runLater
+                zhName = zh
+                applyTitle()
+            }
+        }.apply { isDaemon = true; name = "mcmod-name" }.start()
+    }
+
     // ---------- 安装 ----------
 
     private fun install(version: Modrinth.Version, file: Modrinth.File) {
@@ -512,7 +538,7 @@ internal class ModDetailView(
             return
         }
         // 文件名里那档「中文译名」用的就是这里：接口只给英文标题，译名得自己补
-        val installName = ModNames.zhOf(project.slug, project.title)
+        val installName = zhName ?: ModNames.zhOf(project.slug, project.title)
         val outName = fileNameOf(Prefs.resourceNaming, installName, file.fileName)
         val entry = InstallLog.begin(installName, kind, outName, File(dir, outName), file.size)
         note.text = "正在下载 ${file.fileName}…"
