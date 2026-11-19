@@ -1,6 +1,8 @@
 package org.example.statemind.core.loader
 
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import org.example.statemind.core.HttpText
 import org.example.statemind.core.MiniJson
 import org.example.statemind.core.auth.Http
 
@@ -13,7 +15,18 @@ import org.example.statemind.core.auth.Http
  */
 object LoaderSource {
 
-    fun versions(kind: LoaderKind, mcVersion: String): List<String> {
+    /**
+     * 每个 (加载器, 游戏版本) 只问一次服务器。
+     *
+     * 空表也缓存：接口回 200 却没有内容，就是这个版本确实没有安装包（老版本、快照、愚人节版本
+     * 都常见）。不缓存的话每点一次 chip 都要再等一轮，正是「加载慢、反复加载」的来源。
+     */
+    private val cache = ConcurrentHashMap<String, List<LoaderVersion>>()
+
+    fun cached(kind: LoaderKind, mcVersion: String): List<LoaderVersion>? = cache[keyOf(kind, mcVersion)]
+
+    fun versions(kind: LoaderKind, mcVersion: String): List<LoaderVersion> {
+        cache[keyOf(kind, mcVersion)]?.let { return it }
         val url = when (kind) {
             LoaderKind.FABRIC -> "https://meta.fabricmc.net/v2/versions/loader/$mcVersion"
             LoaderKind.QUILT -> "https://meta.quiltmc.org/v3/versions/loader/$mcVersion"
@@ -23,22 +36,26 @@ object LoaderSource {
         val list = MiniJson.parse(body) as? List<*> ?: return emptyList()
         val parsed = list.mapNotNull { item ->
             val loader = (item as? Map<*, *>)?.get("loader") as? Map<*, *>
-            val version = (loader?.get("version") as? String)?.takeIf { it.isNotBlank() }
                 ?: return@mapNotNull null
-            version to (loader?.get("stable") as? Boolean)
-        }.distinctBy { it.first }
+            val version = (loader["version"] as? String)?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            LoaderVersion(version, loader["stable"] == true)
+        }.distinctBy { it.id }
 
         // 两家都按「新的在前」返回，但 Quilt 把 beta 排在正式版前面 —— 直接取第一个会选中 beta。
         // 稳定 > 普通 > 预发布；同一档里保持服务端给的顺序（sortedBy 是稳定排序）。
-        return parsed.sortedByDescending { (version, stable) ->
-            val pre = listOf("-beta", "-rc", "-alpha").any { version.contains(it) }
+        val result = parsed.sortedByDescending {
             when {
-                stable == true -> 2
-                pre -> 0
+                it.stable -> 2
+                it.preRelease -> 0
                 else -> 1
             }
-        }.map { it.first }
+        }
+        cache[keyOf(kind, mcVersion)] = result
+        return result
     }
+
+    private fun keyOf(kind: LoaderKind, mcVersion: String): String = "${kind.name}@$mcVersion"
 
     fun profileUrl(kind: LoaderKind, mcVersion: String, loaderVersion: String): String = when (kind) {
         LoaderKind.FABRIC ->
@@ -69,9 +86,21 @@ object LoaderSource {
 
     private fun getText(url: String): String {
         val response = Http.get(url, 20)
-        if (response.status !in 200..299) throw IOException("HTTP ${response.status}")
+        if (response.status !in 200..299) throw IOException(HttpText.of(response.status))
         return response.body
     }
+}
+
+/**
+ * 一条加载器版本。`stable` 要跟着回来 —— 界面得标出「稳定版 / 测试版」，
+ * 只留版本号的话用户只能靠记数字猜哪个是正式发布的。
+ */
+data class LoaderVersion(val id: String, val stable: Boolean) {
+
+    /** Quilt 的 meta 不保证给 stable，版本号里的后缀是第二道判据。 */
+    val preRelease: Boolean get() = listOf("-beta", "-rc", "-alpha").any { id.contains(it) }
+
+    val label: String get() = if (stable) "稳定版" else "测试版"
 }
 
 /** 用户选定的那一个加载器。 */
