@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import org.example.statemind.core.FileSource
+import org.example.statemind.core.InstallMarker
 import org.example.statemind.core.MiniJson
 import org.example.statemind.core.Prefs
 import org.example.statemind.core.RecentInstall
@@ -34,6 +35,12 @@ internal object DownloadRunner {
         job.state = DownloadJob.State.PREPARING
         job.note = "准备中…"
         DownloadCenter.notifyChanged()
+
+        // 目录是这一次新建的才留「未完成」痕迹：中途失败或取消时，首页下拉不该把这个
+        // 半成品当成已安装版本列出来。目录本来就在（别的启动器装的）就不碰它。
+        val versionDir = File(root, "versions/${job.versionId}")
+        val createdDir = !versionDir.exists()
+        if (createdDir) InstallMarker.mark(versionDir)
 
         val plan = DownloadPlanner.plan(entry, root, source, loader) { note ->
             job.note = note
@@ -138,8 +145,23 @@ internal object DownloadRunner {
         DownloadCenter.notifyChanged()
         // 真的装到盘上了才发这一路通知：界面据此把「已安装的版本」重新扫一遍
         if (job.state == DownloadJob.State.DONE) {
-            RecentInstall.remember(entry.id, loader?.kind?.label)
+            InstallMarker.clear(versionDir)
+            RecentInstall.remember(job.versionId, entry.id, loader?.kind?.label)
             DownloadCenter.notifyFinished(job)
+        }
+
+        // 取消就把这次新建的版本目录整个抹掉。留着半份文件，下次重下会被「大小对得上」
+        // 的续传判断当成已经下完 —— 看上去点一下一秒就装好，其实缺文件。
+        // 目录不是这次建的（别的启动器装的）就不动它，只清掉我们自己的临时文件。
+        if (job.state == DownloadJob.State.CANCELLED) {
+            job.note = "正在清理…"
+            DownloadCenter.notifyChanged()
+            if (createdDir) {
+                versionDir.deleteRecursively()
+            } else {
+                versionDir.walkTopDown().filter { it.isFile && it.name.endsWith(".part") }
+                    .forEach { runCatching { it.delete() } }
+            }
         }
     }
 
