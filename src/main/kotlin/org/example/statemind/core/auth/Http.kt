@@ -35,6 +35,22 @@ internal object Http {
     fun get(url: String, timeoutSeconds: Long = 15): Response =
         get(url, emptyMap(), timeoutSeconds)
 
+    /**
+     * 取一小段二进制（图标这类）。失败返回 null —— 少一张图不该把整页炸掉。
+     *
+     * 共用 [client]：同一批图标复用同一条连接，省掉每个图标一次 TLS 握手；
+     * 那一步在跨国网络上往往比传图本身还慢。
+     */
+    fun getBytes(url: String, timeoutSeconds: Long = 20): ByteArray? = runCatching {
+        val req = HttpRequest.newBuilder(URI.create(url))
+            .timeout(Duration.ofSeconds(timeoutSeconds))
+            .header("User-Agent", USER_AGENT)
+            .GET()
+            .build()
+        val res = client.send(req, HttpResponse.BodyHandlers.ofByteArray())
+        if (res.statusCode() in 200..299) res.body() else null
+    }.getOrNull()
+
     /** 带自定义请求头的 GET（CurseForge 的 `x-api-key` 就走这条）。 */
     fun get(url: String, headers: Map<String, String>, timeoutSeconds: Long = 15): Response {
         val builder = HttpRequest.newBuilder(URI.create(url))
@@ -42,7 +58,9 @@ internal object Http {
             .header("User-Agent", USER_AGENT)
             .header("Accept", "application/json")
             .GET()
-        headers.forEach { (name, value) -> builder.header(name, value) }
+        // 用 setHeader 而不是 header：自定义头里带 User-Agent 时要替换掉默认那条，
+        // 否则请求会带两个 UA（Modrinth 这类服务会按它限流）。
+        headers.forEach { (name, value) -> builder.setHeader(name, value) }
         return send(builder.build())
     }
 
