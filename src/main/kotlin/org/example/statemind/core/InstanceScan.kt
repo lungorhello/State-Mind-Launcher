@@ -28,7 +28,9 @@ object InstanceScan {
         val id: String,
         val dir: File,
         val loader: Loader,
-        val mcVersion: String
+        val mcVersion: String,
+        /** 上次下载没走完（见 [InstallMarker]）。界面不该把它当成能启动的版本。 */
+        val incomplete: Boolean = false
     ) {
         /** 卡片第二行。 */
         val description: String get() = "${loader.label} · $mcVersion"
@@ -89,7 +91,8 @@ object InstanceScan {
                     id = id,
                     dir = dir,
                     loader = loaderOf(root),
-                    mcVersion = mcVersionOf(root, id)
+                    mcVersion = mcVersionOf(root, id),
+                    incomplete = InstallMarker.isIncomplete(dir)
                 )
             )
         }
