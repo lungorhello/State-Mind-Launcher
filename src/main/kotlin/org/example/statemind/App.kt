@@ -205,6 +205,10 @@ class App : Application() {
         // 不只是启动时扫一次：装完一个新版本再扫一遍，首页下拉里就自己多出这一项。
         // 重扫**保住用户当前选的那个版本** —— 刚下完就把人家正在选的版本顶掉，比不刷新更烦人。
         var scanGeneration = 0
+
+        /** 刚装好的版本 id：下一次重扫要把它选中，之后就不再干预用户的选择。 */
+        var pendingPick: String? = null
+
         fun rescan(first: Boolean) {
             val mine = ++scanGeneration
             Thread {
@@ -217,6 +221,12 @@ class App : Application() {
                     // 让旧结果写界面会把刚删掉的版本又放回下拉。
                     if (mine != scanGeneration) return@runLater
                     val previous = gameVersion.value?.target
+                    // 刚装完的那个优先于「原来选的那个」——否则下完新版本，下拉还停在旧版本上。
+                    // 只认一次：之后的切页重扫不该继续抢用户手动改的选择。
+                    val pick = pendingPick
+                    pendingPick = null
+                    val preferred = pick?.let { id -> choices.firstOrNull { it.target?.versionId == id } }
+                        ?: choices.firstOrNull { it.target == previous }
                     if (choices.isEmpty()) {
                         // 占位项是列表里**真实的一项**：ComboBox 没有选中值时连提示文字都不画
                         // （0.2 起的老毛病），只能靠「选中项确实在 items 里」这条路
@@ -226,7 +236,7 @@ class App : Application() {
                     } else {
                         gameVersion.items.setAll(choices)
                         gameVersion.isDisable = false
-                        gameVersion.value = choices.firstOrNull { it.target == previous } ?: choices.first()
+                        gameVersion.value = preferred ?: choices.first()
                     }
                     // Java 有没有不在这里判：真点启动时再解析，缺 Java 会弹窗说清楚原因
                     launchBtn.isDisable = choices.isEmpty()
@@ -246,8 +256,13 @@ class App : Application() {
         // 从这里开始，切回首页 = 重扫。首次 open 发生在上面，那时还是空函数。
         refreshVersions = { rescan(first = false) }
 
-        // 装完一个版本 → 首页那个下拉里自己多出这一项（选择不动：想玩新版本自己点一下）
-        DownloadCenter.onJobFinished { Platform.runLater { rescan(first = false) } }
+        // 装完一个版本 → 首页下拉里自己多出这一项，并且直接选中它
+        DownloadCenter.onJobFinished { job ->
+            Platform.runLater {
+                pendingPick = job.versionId
+                rescan(first = false)
+            }
+        }
     }
 
     /**
@@ -489,16 +504,30 @@ class App : Application() {
     /**
      * 把扫描结果摊成下拉里的项。同一个版本 id 出现在多个目录里时**补上目录昵称**才分得清 ——
      * 只有一个的时候不加，免得整列都拖着长尾巴。
+     *
+     * 下载没走完的版本不进这个列表：它的 json 已经落盘，但资源还缺，点了也起不来。
+     * 实例页仍然看得到它（带「未完成」标记），那里是管理界面，不是启动入口。
      */
     private fun choicesOf(dirs: List<InstanceScan.Directory>): List<Choice> {
-        val flat = dirs.flatMap { d -> d.versions.map { d to it } }
+        val flat = dirs.flatMap { d -> d.versions.filterNot { it.incomplete }.map { d to it } }
         val repeated = flat.groupingBy { it.second.id }.eachCount().filterValues { it > 1 }.keys
         return flat.map { (d, v) ->
+            val name = displayName(v)
             Choice(
                 target = LaunchTarget(v.id, d.gameDir, d.sharedRoot, d.sourceName),
-                label = if (v.id in repeated) "${v.id}　（${d.title}）" else v.id
+                label = if (v.id in repeated) "$name　（${d.title}）" else name
             )
         }
+    }
+
+    /**
+     * 加载器版本的文件夹名是 `fabric-loader-0.20.1-26.3` 这种机器名，下拉里换成
+     * 「Fabric 26.3」更好认。用户自己起的名字（`mtrformango` 之类）照原样显示 ——
+     * 那是他定的名字，改掉反而认不出来。
+     */
+    private fun displayName(v: InstanceScan.Version): String {
+        val autoPrefix = v.loader.label.lowercase() + "-loader-"
+        return if (v.id.startsWith(autoPrefix)) "${v.loader.label} ${v.mcVersion}" else v.id
     }
 
     /** 下拉里的一项。占位项的 [target] 为 null。 */
