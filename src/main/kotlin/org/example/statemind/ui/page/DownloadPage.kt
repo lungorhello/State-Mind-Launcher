@@ -77,8 +77,11 @@ class DownloadPage(private val onOpenTasks: () -> Unit = {}) : Page {
 
         // 社区内容的默认筛选跟着「最近装好的版本」/「首页选中的版本」走。
         // 用户已经手动改过筛选的话，ModrinthView 会自己忽略这两条通知。
-        LaunchSelection.onChange { community.setPreferred(preferredMcVersion()) }
-        RecentInstall.onChange { community.setPreferred(preferredMcVersion()) }
+        // 这两路通知可能从下载线程打过来（RecentInstall 就是下载线程记的），
+        // 直接改界面会抛「Not on FX application thread」，那次异常还会被下载队列
+        // 当成下载失败记到任务上 —— 于是文件全下完却显示「已中断」。
+        LaunchSelection.onChange { Platform.runLater { community.setPreferred(preferredMcVersion()) } }
+        RecentInstall.onChange { Platform.runLater { community.setPreferred(preferredMcVersion()) } }
         return stage
     }
 
@@ -186,13 +189,16 @@ class DownloadPage(private val onOpenTasks: () -> Unit = {}) : Page {
         root?.isVisible = true
     }
 
-    /** 「开始下载」：登记一个下载任务，然后跳到任务页看进度。 */
+    /** 「开始下载」：登记一个下载任务，退回列表，再跳到任务页看进度。 */
     private fun startDownload() {
         val entry = install.current ?: return
         val root = BackendUtil.minecraftDir
         val job = DownloadCenter.submit(entry, root, Prefs.fileSource, install.choice)
-        // Fabric 系的学生第一件事就是装 Fabric API ；等这次版本落地后再去取，不跟版本下载抢带宽
-        if (install.installFabricApi) FabricApi.afterVersionInstall(job.id, entry.id, root)
+        // Fabric 系：安装页那张卡片已经选好了 API 版本，等这次版本落地后再去取，不跟版本下载抢带宽
+        install.fabricApiVersionId?.let { FabricApi.afterVersionInstall(job.id, entry.id, root, it) }
+        // 先退出安装页：任务页只是过去看一眼进度，回来时该落在版本列表上，
+        // 而不是那个已经点过「开始下载」的确认页
+        showList()
         onOpenTasks()
     }
 }
