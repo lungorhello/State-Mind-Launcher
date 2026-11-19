@@ -67,6 +67,29 @@ object Prefs {
             save()
         }
 
+    /** 「设置 · 下载」：模组 / 资源包 / 光影装到「当前选中的版本」，还是每次下载时现选一个目录。 */
+    var resourceTarget: ResourceTarget
+        get() = ResourceTarget.of(props.getProperty(KEY_RESOURCE_TARGET))
+        set(value) {
+            props.setProperty(KEY_RESOURCE_TARGET, value.name)
+            save()
+        }
+
+    /** 上次在下载框里挑过的目录。只用来定下次弹框的起始位置，不决定任何文件去哪。 */
+    var resourceDir: String
+        get() = props.getProperty(KEY_RESOURCE_DIR).orEmpty()
+        set(value) {
+            props.setProperty(KEY_RESOURCE_DIR, value)
+            save()
+        }
+
+    var resourceNaming: ResourceNaming
+        get() = ResourceNaming.of(props.getProperty(KEY_RESOURCE_NAMING))
+        set(value) {
+            props.setProperty(KEY_RESOURCE_NAMING, value.name)
+            save()
+        }
+
     /** 这个启动器实例的随机标识，生成一次长期复用：同一份 clientToken 发出去的令牌才能 refresh。 */
     val yggdrasilClientToken: String
         get() {
@@ -106,6 +129,9 @@ object Prefs {
     private const val KEY_VERSION_LIST_SOURCE = "download.versionListSource"
     private const val KEY_DOWNLOAD_THREADS = "download.threads"
     private const val KEY_DOWNLOAD_SPEED_KBPS = "download.speedKbps"
+    private const val KEY_RESOURCE_TARGET = "download.resourceTarget"
+    private const val KEY_RESOURCE_DIR = "download.resourceDir"
+    private const val KEY_RESOURCE_NAMING = "download.resourceNaming"
 
     /** 「无限制」时的实际线程上限：再高只会把磁盘和网络排队排死。 */
     const val THREADS_MAX = 64
