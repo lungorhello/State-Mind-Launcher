@@ -131,6 +131,17 @@ object InstanceScan {
      *
      * **绝不能直接拿 `id` 当版本号**：它多半是用户自己起的文件夹名。
      */
+    /**
+     * 单独问一个版本的原版版本号（社区内容按「游戏版本」筛选时要用）。
+     * 读不到 json 就返回 null —— 调用方宁可退回「全部版本」，也不要拿加载器版本号去筛。
+     */
+    fun mcVersionOf(gameDir: File, versionId: String): String? {
+        val json = File(File(gameDir, "versions"), "$versionId/$versionId.json")
+        if (!json.isFile) return null
+        val root = runCatching { MiniJson.parse(json.readText(Charsets.UTF_8)) as? Map<*, *> }.getOrNull()
+        return mcVersionOf(root, versionId)
+    }
+
     private fun mcVersionOf(root: Map<*, *>?, id: String): String {
         val inherits = root?.get("inheritsFrom") as? String
         if (!inherits.isNullOrBlank()) return inherits
@@ -165,18 +176,5 @@ object InstanceScan {
         else a.id.compareTo(b.id)
     }
 
-    /** 按点分段比大小：`1.21.1` > `1.20.10` > `1.9`；段里不是数字的（快照名）按字符串比。 */
-    private fun compareMc(a: String, b: String): Int {
-        val pa = a.split('.')
-        val pb = b.split('.')
-        for (i in 0 until maxOf(pa.size, pb.size)) {
-            val x = pa.getOrNull(i).orEmpty()
-            val y = pb.getOrNull(i).orEmpty()
-            val nx = x.toIntOrNull()
-            val ny = y.toIntOrNull()
-            val c = if (nx != null && ny != null) nx.compareTo(ny) else x.compareTo(y)
-            if (c != 0) return c
-        }
-        return 0
-    }
+    private fun compareMc(a: String, b: String): Int = McVersion.compare(a, b)
 }
