@@ -9,6 +9,8 @@ import javafx.scene.control.ComboBox
 import javafx.scene.control.Label
 import javafx.scene.control.ScrollPane
 import javafx.scene.control.TextField
+import javafx.scene.input.Clipboard
+import javafx.scene.input.ClipboardContent
 import javafx.scene.layout.HBox
 import javafx.scene.layout.Priority
 import javafx.scene.layout.Region
@@ -36,8 +38,9 @@ import java.util.concurrent.Callable
  * （传统目录 / multi 系都收，见 [GameDir.resolve]）→ 成功弹窗报出识别结果和版本数，
  * 失败则说清原因并**带着已填的内容**退回表单，不用重填。
  *
- * 这一版**只做展示**：卡片点了没反应，启动仍在首页选 —— 但首页会把「版本 + 它所属的目录」
- * 一起带上，所以选了别的目录里的版本，启动用的就是那个目录。
+ * 这一版卡片不做「独立设置」（改内存、换 Java 之类），启动仍然在首页选 —— 但首页会把
+ * 「版本 + 它所属的目录」一起带上，所以选了别的目录里的版本，启动用的就是那个目录。
+ * 卡片右边可以删除这个版本（要打出名字确认），删的是 `versions/<id>` 整个文件夹。
  * 清单 = [GameDirStore.all]（内置的默认目录 + 用户添加的那几条），版本每次刷新现扫（[InstanceScan.scanAll]）。
  */
 class SettingInstancePage : Page {
@@ -197,7 +200,7 @@ class SettingInstancePage : Page {
         }
     }
 
-    /** 一张版本卡片：左边图标，右边版本名 + 描述。 */
+    /** 一张版本卡片：左边图标，右边版本名 + 描述，最右边删除。 */
     private fun versionCard(v: InstanceScan.Version): HBox {
         val name = Label(v.id).apply {
             style = "-fx-font-size: 13px; -fx-text-fill: #1f1f22;"
@@ -212,7 +215,12 @@ class SettingInstancePage : Page {
         val info = VBox(2.0, name, desc).apply { minWidth = 0.0 }
         HBox.setHgrow(info, Priority.ALWAYS)
 
-        return HBox(11.0, versionIcon(v.loader), info).apply {
+        val remove = Button("删除").apply {
+            style = BTN_GHOST_SMALL
+            setOnAction { askDeleteVersion(v) }
+        }
+
+        return HBox(11.0, versionIcon(v.loader), info, remove).apply {
             alignment = Pos.CENTER_LEFT
             padding = Insets(9.0, 12.0, 9.0, 12.0)
             minWidth = 0.0                    // 窄容器里能压缩，别把整行顶出去
@@ -395,6 +403,49 @@ class SettingInstancePage : Page {
         }
         Dialogs.info("添加成功", "$summary\n${dir.absolutePath}")
         refresh()
+    }
+
+    // ---------- 删除版本 ----------
+
+    /**
+     * 删一个版本 = 删 `versions/<id>` 整个文件夹。不可恢复，所以要用户把版本名打一遍 ——
+     * 这一屏点错一下就是几个 G 的库和配置没了。名字长的给个复制按钮，别逼着人对着屏幕敲。
+     */
+    private fun askDeleteVersion(v: InstanceScan.Version) {
+        val field = TextField().apply {
+            promptText = v.id
+            maxWidth = CONTENT_WIDTH
+            style = FIELD_STYLE
+        }
+        val copy = Button("复制").apply {
+            style = BTN_GHOST
+            setOnAction {
+                Clipboard.getSystemClipboard().setContent(
+                    ClipboardContent().apply { putString(v.id) }
+                )
+                field.requestFocus()
+            }
+        }
+        val input = HBox(8.0, field, copy).apply { alignment = Pos.CENTER_LEFT }
+
+        Dialogs.confirm(
+            title = "删除版本",
+            body = "将删除 versions/${v.id} 整个文件夹，无法恢复。\n输入版本名以确认。",
+            kind = Dialogs.Kind.ERROR,
+            confirmText = "删除",
+            extra = input,
+            contentHeight = 200.0,
+            confirmDisabledWhen = Bindings.createBooleanBinding(
+                Callable { field.text.trim() != v.id },
+                field.textProperty()
+            )
+        ) {
+            val deleted = runCatching { v.dir.deleteRecursively() }.getOrDefault(false)
+            if (!deleted && v.dir.exists()) {
+                Dialogs.error("删除失败", "有文件正在被占用。关掉游戏或资源管理器后重试。")
+            }
+            refresh()
+        }
     }
 
     // ---------- 移除目录 ----------
