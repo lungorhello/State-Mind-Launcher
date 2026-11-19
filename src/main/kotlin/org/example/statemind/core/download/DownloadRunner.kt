@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.AtomicReference
 import org.example.statemind.core.FileSource
 import org.example.statemind.core.MiniJson
 import org.example.statemind.core.Prefs
+import org.example.statemind.core.RecentInstall
 import org.example.statemind.core.VersionEntry
 import org.example.statemind.core.loader.LoaderChoice
 
@@ -76,10 +77,14 @@ internal object DownloadRunner {
                         val index = next.getAndIncrement()
                         if (index >= pending.size) break
                         val item = pending[index]
+                        val trackKey = item.target.absolutePath
+                        val track = DownloadJob.FileProgress(item.target.name, item.size)
+                        job.runningFiles[trackKey] = track
                         try {
                             Fetcher.fetch(item, { bytes ->
                                 limiter.acquire(bytes)
                                 done.addAndGet(bytes.toLong())
+                                track.done += bytes
                             }, job::isCancelled)
                             doneFiles.incrementAndGet()
                         } catch (_: CancelledException) {
@@ -87,6 +92,8 @@ internal object DownloadRunner {
                         } catch (e: Exception) {
                             failed.incrementAndGet()
                             firstError.compareAndSet(null, "${item.target.name}：${e.message ?: e}")
+                        } finally {
+                            job.runningFiles.remove(trackKey)
                         }
                     }
                 } finally {
@@ -130,7 +137,10 @@ internal object DownloadRunner {
         }
         DownloadCenter.notifyChanged()
         // 真的装到盘上了才发这一路通知：界面据此把「已安装的版本」重新扫一遍
-        if (job.state == DownloadJob.State.DONE) DownloadCenter.notifyFinished(job)
+        if (job.state == DownloadJob.State.DONE) {
+            RecentInstall.remember(entry.id, loader?.kind?.label)
+            DownloadCenter.notifyFinished(job)
+        }
     }
 
     /** 每 [PUBLISH_MS] 毫秒把计数刷到任务上，顺便算瞬时速度。 */
