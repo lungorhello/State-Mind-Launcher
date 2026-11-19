@@ -12,6 +12,18 @@ import org.example.statemind.core.loader.LoaderChoice
 /** 一个下载任务对外的全部状态。字段都是 volatile：下载线程写，界面线程读。 */
 class DownloadJob internal constructor(val id: Long, val versionId: String) {
 
+    /**
+     * 正在下的单个文件。整份版本动辄几百个文件，光有一条总进度看不出「卡在哪」，
+     * 任务页据此再列几行分进度。
+     */
+    class FileProgress(val name: String, val total: Long) {
+        @Volatile
+        var done: Long = 0L
+    }
+
+    /** key = 目标路径（不同目录下可能有同名文件）。 */
+    val runningFiles = java.util.concurrent.ConcurrentHashMap<String, FileProgress>()
+
     enum class State { WAITING, PREPARING, RUNNING, DONE, FAILED, CANCELLED }
 
     @Volatile var state: State = State.WAITING
