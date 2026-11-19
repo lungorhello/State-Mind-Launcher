@@ -6,6 +6,7 @@ import java.net.URI
 import javafx.application.Platform
 import javafx.geometry.Insets
 import javafx.geometry.Pos
+import javafx.scene.Cursor
 import javafx.scene.control.Button
 import javafx.scene.control.ComboBox
 import javafx.scene.control.Label
@@ -18,6 +19,8 @@ import javafx.scene.layout.Priority
 import javafx.scene.layout.Region
 import javafx.scene.layout.StackPane
 import javafx.scene.layout.VBox
+import javafx.scene.paint.Color
+import javafx.scene.shape.Polygon
 import javafx.stage.DirectoryChooser
 import org.example.statemind.core.McVersion
 import org.example.statemind.core.Prefs
@@ -28,6 +31,7 @@ import org.example.statemind.core.mod.InstallLog
 import org.example.statemind.core.mod.InstallTargets
 import org.example.statemind.core.mod.ModInstaller
 import org.example.statemind.core.mod.ModKind
+import org.example.statemind.core.mod.ModNames
 import org.example.statemind.core.mod.Modrinth
 import org.example.statemind.ui.Typo
 
@@ -52,6 +56,26 @@ internal class ModDetailView(
 
     /** 每次换项目 +1：晚回来的旧结果直接丢掉。 */
     private var generation = 0
+
+    /** 每次重排版本列表 +1：上一轮还没铺完的分批渲染据此停下。 */
+    private var renderGeneration = 0
+
+    /** 展开着的分组。默认空 = 全部收起，跟 PCL 的版本列表一致。 */
+    private val expandedGroups = HashSet<String>()
+
+    /**
+     * 一个「加载器 + 游戏版本」分组。
+     *
+     * [preview] 指快照这一类非正式发布，标题后面缀「预览版」—— 同一套加载器下 26.3 与
+     * 26.3 的快照是两栏，不标出来会以为是重复项。
+     */
+    private data class GroupRow(
+        val key: String,
+        val loaderLabel: String,
+        val mc: String,
+        val preview: Boolean,
+        val versions: List<Modrinth.Version>
+    )
 
     private val iconBox = StackPane()
     private val title = Label().apply {
@@ -173,9 +197,12 @@ internal class ModDetailView(
         this.kind = kind
         this.hit = hit
         generation++
+        renderGeneration++
         val mine = generation
 
-        title.text = hit.title
+        // 有中文译名就「译名 | 原名」，跟 PCL 一个样子；没有就只显示原名
+        val zh = ModNames.zhOf(hit.slug, hit.title)
+        title.text = if (zh == hit.title) hit.title else "$zh | ${hit.title}"
         meta.text = buildList {
             hit.author.takeIf { it.isNotBlank() }?.let(::add)
             add(downloadsText(hit.downloads))
@@ -190,6 +217,7 @@ internal class ModDetailView(
 
         versions = emptyList()
         rows.children.clear()
+        expandedGroups.clear()
         note.text = ""
         scroll.vvalue = 0.0
         fillWorlds()
@@ -261,11 +289,158 @@ internal class ModDetailView(
             else -> note.text = ""
         }
 
-        val shown = filtered.take(MAX_ROWS)
-        shown.forEachIndexed { index, version -> rows.children += versionRow(version, index, shown.lastIndex) }
-        // 版本太多的项目（几百个）全铺出来会让这页很长；筛一下游戏版本就能缩小范围
-        if (filtered.size > MAX_ROWS) {
-            note.text = "共 ${filtered.size} 个版本，只列出最近 $MAX_ROWS 个 —— 选一个游戏版本可以缩小范围。"
+        val shown = filtered
+        rows.children.clear()
+        // 一个项目动辄上千个版本，全量建节点会卡住界面；分批往事件队列里塞，
+        // 每批之间留一次重绘的机会，滚动条照样能一路滑到底。
+        renderGeneration++
+        // 选了具体游戏版本就只有一个维度，平铺；「全部版本」按加载器 + 游戏版本分组
+        if (gv != null) appendBatch(shown, 0, renderGeneration) else appendGroups(shown)
+    }
+
+    /**
+     * 「全部版本」时按 **加载器 + 游戏版本** 归组，默认全部收起。
+     *
+     * 一个项目在 26.3 下同时有 Fabric / NeoForge 两套文件，平铺出来就是一长串
+     * 「Sodium 0.9.3-beta.5 for NeoForge 26.3」，光看标题分不出这一行属于哪一套，
+     * 还得每行再挂一串小字说明版本与加载器。分组之后这些信息都落在标题上。
+     */
+    private fun appendGroups(all: List<Modrinth.Version>) {
+        val bucket = LinkedHashMap<String, MutableList<Modrinth.Version>>()
+        for (version in all) {
+            // 资源包 / 光影没有加载器这一维，只有游戏版本
+            val loaders = version.loaders.ifEmpty { listOf("") }
+            for (mc in version.gameVersions) {
+                for (raw in loaders) {
+                    bucket.getOrPut("$raw|$mc") { ArrayList() } += version
+                }
+            }
+        }
+        val groups = bucket.map { (key, list) ->
+            val raw = key.substringBefore('|')
+            val mc = key.substringAfter('|')
+            GroupRow(
+                key = key,
+                loaderLabel = if (raw.isBlank()) "" else ModLoaders.labelOf(raw),
+                mc = mc,
+                preview = isPreview(mc),
+                versions = list
+            )
+        }.sortedWith(GROUP_ORDER)
+
+        appendGroupBatch(groups, 0, renderGeneration)
+    }
+
+    private fun appendGroupBatch(groups: List<GroupRow>, from: Int, generation: Int) {
+        if (generation != renderGeneration) return
+        val end = minOf(from + GROUP_BATCH, groups.size)
+        for (index in from until end) rows.children += groupBlock(groups[index])
+        if (end < groups.size) {
+            Platform.runLater { appendGroupBatch(groups, end, generation) }
+        }
+    }
+
+    private fun groupBlock(group: GroupRow): Region {
+        val open = group.key in expandedGroups
+        val title = buildString {
+            if (group.loaderLabel.isNotBlank()) append(group.loaderLabel).append(' ')
+            append(group.mc)
+            if (group.preview) append(" 预览版")
+        }
+        val name = Label(title).apply {
+            style = "-fx-font-size: 13px; -fx-text-fill: ${DownloadStyles.TEXT};"
+        }
+        val count = Label("${group.versions.size}").apply { style = Typo.NOTE }
+        val base = if (open) DownloadStyles.CARD_TOP else DownloadStyles.CARD
+        val hover = if (open) DownloadStyles.CARD_HOVER_TOP else DownloadStyles.CARD_HOVER
+        val head = HBox(
+            8.0, name, count,
+            Region().apply { HBox.setHgrow(this, Priority.ALWAYS) },
+            foldMark(open)
+        ).apply {
+            alignment = Pos.CENTER_LEFT
+            padding = Insets(11.0, 16.0, 11.0, 16.0)
+            cursor = Cursor.HAND
+            style = base
+            setOnMouseEntered { style = hover }
+            setOnMouseExited { style = base }
+            setOnMouseClicked {
+                if (!expandedGroups.remove(group.key)) expandedGroups += group.key
+                renderVersions()
+            }
+        }
+
+        val box = VBox(head)
+        if (!open) return box
+        group.versions.forEachIndexed { index, version ->
+            box.children += groupItem(version, index, group.versions.lastIndex)
+        }
+        return box
+    }
+
+    /** 分组里的一行：标题已经写明加载器与游戏版本，这行只留文件本身的信息。 */
+    private fun groupItem(version: Modrinth.Version, index: Int, last: Int): Region {
+        val name = Label(version.name.ifBlank { version.number }).apply {
+            style = "-fx-font-size: 13px; -fx-text-fill: ${DownloadStyles.TEXT};"
+            maxWidth = Double.MAX_VALUE
+        }
+        val file = version.files.firstOrNull()
+        val metaText = buildList {
+            if (version.published.isNotBlank()) add(version.published)
+            file?.let { if (it.size > 0) add(bytes(it.size)) }
+        }.joinToString(" · ")
+        val info = VBox(2.0, name, Label(metaText).apply { style = Typo.NOTE }).apply { minWidth = 0.0 }
+        HBox.setHgrow(info, Priority.ALWAYS)
+
+        val canPick = file != null && !(kind.needsWorld && worldBox.value.isNullOrBlank())
+        val download = Button("下载").apply {
+            style = BTN_PRIMARY
+            isDisable = !canPick
+            if (file == null) tooltip = Tooltip("这个版本没有可下载的文件")
+            setOnAction { file?.let { install(version, it) } }
+        }
+
+        val content = HBox(12.0, info, download).apply {
+            alignment = Pos.CENTER_LEFT
+            padding = Insets(10.0, 16.0, 10.0, 16.0)
+        }
+        val divider = Region().apply {
+            minHeight = 1.0
+            prefHeight = 1.0
+            maxHeight = 1.0
+            style = "-fx-background-color: ${DownloadStyles.CARD_DIVIDER};"
+        }
+        val base = if (index == last) DownloadStyles.CARD_BOTTOM else DownloadStyles.CARD_MIDDLE
+        val hover = if (index == last) DownloadStyles.CARD_HOVER_BOTTOM else DownloadStyles.CARD_HOVER_MIDDLE
+        return VBox(divider, content).apply {
+            style = base
+            setOnMouseEntered { style = hover }
+            setOnMouseExited { style = base }
+        }
+    }
+
+    /** 用矢量画折叠箭头：字符箭头在部分系统上缺字。 */
+    private fun foldMark(open: Boolean): Polygon {
+        val points = if (open) {
+            doubleArrayOf(0.0, 0.0, 9.0, 0.0, 4.5, 5.0)
+        } else {
+            doubleArrayOf(0.0, 0.0, 5.0, 4.5, 0.0, 9.0)
+        }
+        return Polygon(*points).apply { fill = Color.web(DownloadStyles.TEXT_DIM) }
+    }
+
+    /**
+     * 追加 [from] 之后的一批版本行。换筛选条件时 [renderGeneration] 会加一，
+     * 上一轮还没跑完的批次在下一帧自己退出。
+     */
+    private fun appendBatch(all: List<Modrinth.Version>, from: Int, generation: Int) {
+        if (generation != renderGeneration) return
+        val end = minOf(from + RENDER_BATCH, all.size)
+        for (index in from until end) {
+            rows.children += versionRow(all[index], index, all.lastIndex)
+        }
+        if (end < all.size) {
+            Platform.runLater { appendBatch(all, end, generation) }
         }
     }
 
@@ -336,8 +511,10 @@ internal class ModDetailView(
             note.text = "已取消下载。"
             return
         }
-        val outName = fileNameOf(Prefs.resourceNaming, project.title, file.fileName)
-        val entry = InstallLog.begin(project.title, kind, outName, File(dir, outName), file.size)
+        // 文件名里那档「中文译名」用的就是这里：接口只给英文标题，译名得自己补
+        val installName = ModNames.zhOf(project.slug, project.title)
+        val outName = fileNameOf(Prefs.resourceNaming, installName, file.fileName)
+        val entry = InstallLog.begin(installName, kind, outName, File(dir, outName), file.size)
         note.text = "正在下载 ${file.fileName}…"
 
         Thread {
@@ -395,7 +572,8 @@ internal class ModDetailView(
         VBox(4.0, Label(caption).apply { style = Typo.NOTE }, control).apply {
             prefWidth = width
             maxWidth = Double.MAX_VALUE
-            minWidth = 0.0
+            // 窗口窄时三列会被均分压缩，给个下限，别把字压没
+            minWidth = 110.0
         }
 
     private fun downloadsText(count: Long): String = when {
@@ -415,8 +593,36 @@ internal class ModDetailView(
         const val ALL = "全部版本"
         const val ALL_LOADERS = "全部加载器"
 
-        /** 一页铺太多行会让滚动变卡；社区项目动辄几百个版本。 */
-        const val MAX_ROWS = 60
+        /** 一次往列表里塞多少行。项目动辄上千个版本，全量一次建完会卡住界面。 */
+        const val RENDER_BATCH = 80
+
+        /** 分组标题一次铺多少个。 */
+        const val GROUP_BATCH = 30
+
+        /**
+         * Modrinth 只给游戏版本号、没有「正式 / 快照」标记，只能看形状：
+         * 纯数字点分的（1.21.1、26.3）是正式版，带字母或后缀的（26w14a、26.4-snapshot-10）不是。
+         */
+        private val RELEASE_ID = Regex("^\\d+(\\.\\d+)*$")
+
+        private fun isPreview(mc: String): Boolean = !RELEASE_ID.matches(mc)
+
+        /** 同一批游戏版本下，加载器的先后。 */
+        private val LOADER_ORDER = listOf("Fabric", "Quilt", "Forge", "NeoForge")
+
+        private fun loaderRank(label: String): Int = LOADER_ORDER.indexOf(label).let {
+            if (it >= 0) it else LOADER_ORDER.size
+        }
+
+        /** 游戏版本新的在前；同一版本正式版排在预览版前。 */
+        val GROUP_ORDER: Comparator<GroupRow> = Comparator { a, b ->
+            val byMc = McVersion.compare(b.mc, a.mc)
+            when {
+                byMc != 0 -> byMc
+                a.preview != b.preview -> if (a.preview) 1 else -1
+                else -> loaderRank(a.loaderLabel) - loaderRank(b.loaderLabel)
+            }
+        }
 
         const val BTN_GHOST =
             "-fx-background-color: #ffffff; -fx-border-color: #d4d4d8; -fx-border-width: 1;" +
