@@ -101,6 +101,9 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
     /** 版本清单里全部正式版的版本号，新的在前。换内容类型时按下限重滤一遍。 */
     private var releases: List<String> = emptyList()
 
+    /** 全量正式版（不过滤常见版本），只用来把当前选中的冷门版本补回筛选列表。 */
+    private var allReleases: List<String> = emptyList()
+
     private var offset = 0
     private var total = 0
     private var loading = false
@@ -204,11 +207,12 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
 
     // ---------- 对外 ----------
 
-    /** 版本下拉的内容来自原版版本清单；只放正式版 —— 社区内容基本都是给正式版做的。 */
+    /** 版本下拉的内容来自原版版本清单；只放正式版，且只留常见的那些（见 [McVersion.commonVersions]）。 */
     fun setVersions(versions: List<VersionEntry>) {
-        releases = versions
+        allReleases = versions
             .filter { VersionGroups.groupOf(it) == VersionGroups.Group.RELEASE }
             .map { it.id }
+        releases = McVersion.commonVersions(allReleases, preferred)
         rebuildVersionItems()
         applyPreferred()
     }
@@ -218,8 +222,12 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
      * 重开启动器时才恢复成「跟着最近装好的 / 首页选中的版本」。
      */
     fun setPreferred(mcVersion: String?) {
+        val changed = preferred != mcVersion
         preferred = mcVersion
-        if (followDefault) applyPreferred()
+        if (!followDefault || !changed) return
+        // 选中的版本可能不在常见表里（老整合包常用的 1.16.5 之类），补一项再应用
+        rebuildVersionItems()
+        applyPreferred()
     }
 
     fun show(kind: ModKind) {
@@ -248,7 +256,8 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
      * 留在筛选里只会让人点出一片空列表。
      */
     private fun rebuildVersionItems() {
-        val usable = releases.filter { McVersion.atLeast(it, kind.minGameVersion) }
+        val usable = releases.filter { McVersion.atLeast(it, kind.minGameVersion) }.toMutableList()
+        preferred?.let { if (it in allReleases && it !in usable) usable += it }
         val labels = listOf(ALL_VERSIONS) + usable
         applying = true
         versionBox.items.setAll(labels)
@@ -310,9 +319,16 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
         applyVersion(resolved)
     }
 
-    /** 输入框换人（皮肤重建）时重新挂一次失焦提交。 */
+    /**
+     * 输入框换人（皮肤重建）时重新挂一次失焦提交。
+     *
+     * 顺手把 editor 自带的底与框清掉：可编辑 ComboBox 会给内部文本框再画一层边框，
+     * 叠在 ComboBox 自己的圆角框里就像「两个框套在一起」，高度也多出一截。
+     */
     private fun watchEditor(field: TextField?) {
         field ?: return
+        field.style = "-fx-background-color: transparent; -fx-border-color: transparent;" +
+                "-fx-background-insets: 0; -fx-padding: 0 2 0 2;"
         field.focusedProperty().addListener { _, _, focused -> if (!focused) commitTypedVersion() }
     }
 
@@ -452,7 +468,8 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
         VBox(4.0, Label(caption).apply { style = Typo.NOTE }, control).apply {
             prefWidth = width
             maxWidth = Double.MAX_VALUE
-            minWidth = 0.0
+            // 窗口窄的时候列会被均分压缩；给个下限，别把里面的字压成一截省略号
+            minWidth = 110.0
         }
 
     private fun <T> optionCell(render: (T) -> String): ListCell<T> = object : ListCell<T>() {
