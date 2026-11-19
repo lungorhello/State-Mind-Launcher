@@ -74,7 +74,11 @@ class App : Application() {
             maxWidth = Double.MAX_VALUE
         }
         // 选中的就是「要启动哪一个版本」—— 「设置 · 启动」要按它报出「将使用 Java x.y.z」
-        gameVersion.valueProperty().addListener { _, _, now -> LaunchSelection.select(now?.target) }
+        // items.setAll() 会先把 value 清成 null 再塞新值；那不是用户的选择，跟着清会让
+        // 「将使用 Java」闪一下。占位项是真实的 Choice（target 为 null），所以不受这条影响。
+        gameVersion.valueProperty().addListener { _, _, now ->
+            if (now != null) LaunchSelection.select(now.target)
+        }
 
         val status = Label("").apply {
             style = "-fx-font-size: 12px; -fx-text-fill: #666666;"
@@ -118,8 +122,11 @@ class App : Application() {
         // 首页的内容暂时是原来那套启动表单（整块挪过来显示），启动逻辑仍留在本文件里。
         // 任务页不上导航，入口只有标题栏那个下载图标：按一下进去，再按一下回原来那页。
         var showTasks: () -> Unit = {}
+        // 首页每次切回来都重扫一次：版本可能在「设置 · 实例」里刚被删掉。
+        // 具体实现要等 rescan 定义好 —— 首次 open 时它还是空函数，那一次由下面的显式扫描负责。
+        var refreshVersions: () -> Unit = {}
         val pages: List<Page> = listOf(
-            HomePage { leftPanel },
+            HomePage({ leftPanel }) { refreshVersions() },
             DownloadPage { showTasks() },
             SettingPage(),
             HelpPage(),
@@ -197,13 +204,18 @@ class App : Application() {
         //
         // 不只是启动时扫一次：装完一个新版本再扫一遍，首页下拉里就自己多出这一项。
         // 重扫**保住用户当前选的那个版本** —— 刚下完就把人家正在选的版本顶掉，比不刷新更烦人。
+        var scanGeneration = 0
         fun rescan(first: Boolean) {
+            val mine = ++scanGeneration
             Thread {
                 val dirs = runCatching { InstanceScan.scanAll(GameDirStore.all) }
                     .getOrDefault(emptyList())
                 val choices = choicesOf(dirs)
                 if (first) JavaStore.refresh()
                 Platform.runLater {
+                    // 切页与「下载完成」都会发起扫描，回来时可能已经不是最新那一批了；
+                    // 让旧结果写界面会把刚删掉的版本又放回下拉。
+                    if (mine != scanGeneration) return@runLater
                     val previous = gameVersion.value?.target
                     if (choices.isEmpty()) {
                         // 占位项是列表里**真实的一项**：ComboBox 没有选中值时连提示文字都不画
@@ -231,6 +243,8 @@ class App : Application() {
         }
 
         rescan(first = true)
+        // 从这里开始，切回首页 = 重扫。首次 open 发生在上面，那时还是空函数。
+        refreshVersions = { rescan(first = false) }
 
         // 装完一个版本 → 首页那个下拉里自己多出这一项（选择不动：想玩新版本自己点一下）
         DownloadCenter.onJobFinished { Platform.runLater { rescan(first = false) } }
