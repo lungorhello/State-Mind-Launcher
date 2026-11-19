@@ -4,6 +4,7 @@ import javafx.application.Platform
 import javafx.geometry.Insets
 import javafx.geometry.Pos
 import javafx.scene.control.Button
+import javafx.scene.control.CheckBox
 import javafx.scene.control.ComboBox
 import javafx.scene.control.Label
 import javafx.scene.control.Tooltip
@@ -14,10 +15,12 @@ import javafx.scene.layout.HBox
 import javafx.scene.layout.Priority
 import javafx.scene.layout.Region
 import javafx.scene.layout.VBox
+import javafx.util.StringConverter
 import org.example.statemind.core.VersionEntry
 import org.example.statemind.core.loader.LoaderChoice
 import org.example.statemind.core.loader.LoaderKind
 import org.example.statemind.core.loader.LoaderSource
+import org.example.statemind.core.loader.LoaderVersion
 import org.example.statemind.ui.Typo
 
 /**
@@ -36,9 +39,20 @@ internal class VersionInstallView(
     private val versionLabel = Label()
     private val sourceNote = Label()
     private val loaderNote = Label()
-    private val loaderVersion = ComboBox<String>()
+    private val loaderVersion = ComboBox<LoaderVersion>()
     private val chips = ToggleGroup()
     private val chipButtons = LinkedHashMap<LoaderKind, ToggleButton>()
+
+    /**
+     * Fabric / Quilt 的生态里几乎每个模组都依赖 Fabric API，不装等于装了个空加载器。
+     * 默认勾上，允许取消 —— 有人就是只要加载器本身。
+     */
+    private val fabricApiBox = CheckBox("同时安装 Fabric API").apply {
+        style = "-fx-font-size: 13px; -fx-text-fill: ${DownloadStyles.TEXT_DIM};"
+        isSelected = true
+        isVisible = false
+        isManaged = false
+    }
 
     private val startButton = Button("开始下载").apply {
         style = BTN_PRIMARY
@@ -53,8 +67,15 @@ internal class VersionInstallView(
     var choice: LoaderChoice? = null
         private set
 
+    /** 下载完是否顺手把 Fabric API 装进 mods。 */
+    val installFabricApi: Boolean
+        get() = fabricApiBox.isVisible && fabricApiBox.isSelected
+
     /** 每次换版本 +1：后台线程回来的结果对不上就丢掉，免得把旧版本加载器填进新页面。 */
     private var generation = 0
+
+    /** 加载器可用性的批次号。跟 [generation] 分开：点 chip 不该让「这版能用哪些加载器」作废。 */
+    private var availabilityGen = 0
 
     init {
         padding = Insets(DownloadStyles.PAGE_PADDING)
@@ -82,8 +103,17 @@ internal class VersionInstallView(
 
         loaderVersion.apply {
             style = DownloadStyles.FIELD
-            prefWidth = 220.0
-            maxWidth = 220.0
+            // 跟页面同宽：内容长了不该只剩一小截，也免得下拉弹层被压得很窄
+            prefWidth = 340.0
+            maxWidth = Double.MAX_VALUE
+            visibleRowCount = 8
+            // 下拉里连「稳定版 / 测试版」一起显示，跟 PCL 一样能一眼看出哪个是正式发布
+            converter = object : StringConverter<LoaderVersion>() {
+                override fun toString(value: LoaderVersion?): String =
+                    value?.let { "${it.id}    ${it.label}" }.orEmpty()
+
+                override fun fromString(text: String?): LoaderVersion? = null
+            }
             isVisible = false
             isManaged = false
             valueProperty().addListener { _, _, now -> onLoaderVersion(now) }
@@ -96,6 +126,7 @@ internal class VersionInstallView(
             loaderTitle,
             chipRow,
             loaderVersion,
+            fabricApiBox,
             loaderNote
         ).apply {
             alignment = Pos.TOP_LEFT
@@ -116,6 +147,9 @@ internal class VersionInstallView(
         // 上一版可能是 Fabric 版；换版本时把选择拨回原版，否则「选着 Fabric、实际按原版下」
         chipButtons[LoaderKind.VANILLA]?.isSelected = true
         select(LoaderKind.VANILLA)
+        // 老版本、快照、愚人节版本多半没有加载器安装包：先问清楚，别让人点了才发现
+        availabilityGen++
+        checkLoaders(entry.id, availabilityGen)
     }
 
     fun setSource(label: String) {
@@ -156,6 +190,11 @@ internal class VersionInstallView(
         loaderVersion.items.clear()
         loaderVersion.value = null
 
+        // Fabric 系才有 Fabric API 这回事；原版/以后接上的 Forge 不显示这一项
+        val preinstallApi = kind == LoaderKind.FABRIC || kind == LoaderKind.QUILT
+        fabricApiBox.isVisible = preinstallApi
+        fabricApiBox.isManaged = preinstallApi
+
         if (kind == LoaderKind.VANILLA || entry == null) {
             choice = null
             loaderNote.text = ""
@@ -167,45 +206,95 @@ internal class VersionInstallView(
         choice = null
         startButton.isDisable = true
         showLoaderVersion(false)
+
+        val mc = entry.id
+        // 这一版之前查过就直接用：来回切 chip 不该每次都再等一轮网络
+        LoaderSource.cached(kind, mc)?.let { versions ->
+            fillLoaderVersions(kind, mc, versions)
+            return
+        }
         loaderNote.text = "读取${kind.label}版本…"
 
         val mine = generation
-        val mc = entry.id
         Thread {
             val outcome = runCatching { LoaderSource.versions(kind, mc) }
             Platform.runLater {
                 if (mine != generation) return@runLater
-                val versions = outcome.getOrDefault(emptyList())
-                when {
-                    outcome.isFailure -> {
-                        loaderNote.text = "读取失败：${outcome.exceptionOrNull()?.message ?: "网络错误"}"
-                    }
-
-                    versions.isEmpty() -> {
-                        loaderNote.text = "$mc 没有可用的${kind.label}版本"
-                    }
-
-                    else -> {
-                        loaderNote.text = ""
-                        showLoaderVersion(true)
-                        loaderVersion.items.setAll(versions)
-                        loaderVersion.value = versions.first()
-                    }
-                }
+                outcome
+                    .onSuccess { fillLoaderVersions(kind, mc, it) }
+                    .onFailure { loaderNote.text = "读取失败：${it.message ?: "网络错误"}" }
             }
         }.apply { isDaemon = true; name = "loader-versions" }.start()
     }
 
-    private fun onLoaderVersion(loaderVersionValue: String?) {
+    /** 把某一版的加载器版本填进下拉。空表 = 这个游戏版本确实没有对应安装包。 */
+    private fun fillLoaderVersions(kind: LoaderKind, mc: String, versions: List<LoaderVersion>) {
+        if (versions.isEmpty()) {
+            loaderNote.text = "$mc 没有可用的${kind.label}版本"
+            showLoaderVersion(false)
+            return
+        }
+        loaderNote.text = ""
+        showLoaderVersion(true)
+        loaderVersion.items.setAll(versions)
+        loaderVersion.value = versions.first()
+    }
+
+    /**
+     * 一次问清这个游戏版本能用哪些加载器。
+     *
+     * 早期版本、预览版、愚人节版多半只有原版可装；不提前问的话，用户得挨个点 chip 才看到
+     * 「没有可用版本」。答案进了 [LoaderSource] 的缓存，切回同一版不会再联网。
+     */
+    private fun checkLoaders(mc: String, batch: Int) {
+        val targets = LoaderKind.entries.filter { it.supported && it != LoaderKind.VANILLA }
+        val known = targets.mapNotNull { kind -> LoaderSource.cached(kind, mc)?.let { kind to it } }.toMap()
+        if (known.isNotEmpty()) applyAvailability(known)
+        if (known.size == targets.size) return
+
+        Thread {
+            val found = HashMap<LoaderKind, List<LoaderVersion>>()
+            for (kind in targets) {
+                runCatching { LoaderSource.versions(kind, mc) }.onSuccess { found[kind] = it }
+            }
+            Platform.runLater {
+                // 期间换了版本，这批结果就作废
+                if (batch != availabilityGen || current?.id != mc) return@runLater
+                applyAvailability(found)
+            }
+        }.apply { isDaemon = true; name = "loader-check" }.start()
+    }
+
+    private fun applyAvailability(found: Map<LoaderKind, List<LoaderVersion>>) {
+        for ((kind, versions) in found) {
+            val button = chipButtons[kind] ?: continue
+            if (versions.isEmpty()) {
+                button.isDisable = true
+                button.style = CHIP_OFF_DISABLED
+                button.tooltip = Tooltip("这个版本没有可用的${kind.label}安装包")
+                // 正好选着它：退回原版，否则「禁用但选中」的 chip 会卡住整页
+                if (button.isSelected) {
+                    chipButtons[LoaderKind.VANILLA]?.isSelected = true
+                    select(LoaderKind.VANILLA)
+                }
+            } else {
+                button.isDisable = false
+                button.tooltip = Tooltip("${versions.size} 个可用版本")
+                button.style = if (button.isSelected) CHIP_ON else CHIP_OFF
+            }
+        }
+    }
+
+    private fun onLoaderVersion(loaderVersionValue: LoaderVersion?) {
         val entry = current ?: return
         val kind = (chips.selectedToggle as? ToggleButton)?.userData as? LoaderKind
             ?: LoaderKind.VANILLA
-        if (kind == LoaderKind.VANILLA || loaderVersionValue.isNullOrBlank()) {
+        if (kind == LoaderKind.VANILLA || loaderVersionValue == null) {
             choice = null
             startButton.isDisable = true
             return
         }
-        choice = LoaderSource.choice(kind, entry.id, loaderVersionValue)
+        choice = LoaderSource.choice(kind, entry.id, loaderVersionValue.id)
         startButton.isDisable = false
     }
 
