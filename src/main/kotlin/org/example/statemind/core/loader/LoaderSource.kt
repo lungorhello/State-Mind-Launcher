@@ -4,6 +4,7 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import org.example.statemind.core.HttpText
 import org.example.statemind.core.MiniJson
+import org.example.statemind.core.Prefs
 import org.example.statemind.core.auth.Http
 
 /**
@@ -32,7 +33,7 @@ object LoaderSource {
             LoaderKind.QUILT -> "https://meta.quiltmc.org/v3/versions/loader/$mcVersion"
             else -> throw IOException("${kind.label} 暂不支持")
         }
-        val body = getText(url)
+        val body = fetch(url)
         val list = MiniJson.parse(body) as? List<*> ?: return emptyList()
         val parsed = list.mapNotNull { item ->
             val loader = (item as? Map<*, *>)?.get("loader") as? Map<*, *>
@@ -84,8 +85,26 @@ object LoaderSource {
             profileUrl = profileUrl(kind, mcVersion, loaderVersion)
         )
 
-    private fun getText(url: String): String {
-        val response = Http.get(url, 20)
+    /**
+     * 按设置里的下载源依次试。官方 meta 在国内经常是**连接超时**（不是 4xx），
+     * 所以第一条给短超时，连不上就赶紧换镜像，别让人盯着「读取…」等满 20 秒。
+     */
+    private fun fetch(url: String): String {
+        val candidates = Prefs.fileSource.order(url)
+        var last: Exception? = null
+        candidates.forEachIndexed { index, candidate ->
+            val timeout = if (index == 0 && candidates.size > 1) 6L else 20L
+            try {
+                return getText(candidate, timeout)
+            } catch (e: Exception) {
+                last = e
+            }
+        }
+        throw last ?: IOException("读取失败")
+    }
+
+    private fun getText(url: String, timeoutSeconds: Long = 20L): String {
+        val response = Http.get(url, timeoutSeconds)
         if (response.status !in 200..299) throw IOException(HttpText.of(response.status))
         return response.body
     }
