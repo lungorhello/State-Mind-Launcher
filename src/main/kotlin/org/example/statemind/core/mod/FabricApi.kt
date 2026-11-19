@@ -22,15 +22,27 @@ object FabricApi {
     /** Quilt 能直接吃 Fabric 的模组，Fabric API 同样可装。 */
     private val LOADERS = setOf("fabric", "quilt")
 
-    private class Request(val mcVersion: String, val gameDir: File)
+    private class Request(val mcVersion: String, val gameDir: File, val apiVersionId: String?)
 
     private val pending = ConcurrentHashMap<Long, Request>()
     private val hooked = AtomicBoolean(false)
 
-    /** [jobId] 对应那次版本下载；它成功之后才去取 Fabric API。 */
-    fun afterVersionInstall(jobId: Long, mcVersion: String, gameDir: File) {
+    /**
+     * 某个游戏版本能用的 Fabric API 版本，新在前。会阻塞，调用方扔后台线程。
+     *
+     * 界面要在「选了哪个加载器版本」之后把这张卡片显示出来，所以查询是公开的；
+     * 真正安装时再按 id 找一次 —— 中间可能过了几分钟，列表未必还是那份。
+     */
+    fun versionsFor(mcVersion: String): List<Modrinth.Version> =
+        Modrinth.versions(PROJECT).filter { version ->
+            mcVersion in version.gameVersions && version.loaders.any { it in LOADERS }
+        }
+
+    /** [jobId] 对应那次版本下载；它成功之后才去取 Fabric API。[apiVersionId] 为空就不装。 */
+    fun afterVersionInstall(jobId: Long, mcVersion: String, gameDir: File, apiVersionId: String?) {
+        if (apiVersionId.isNullOrBlank()) return
         installHook()
-        pending[jobId] = Request(mcVersion, gameDir)
+        pending[jobId] = Request(mcVersion, gameDir, apiVersionId)
     }
 
     private fun installHook() {
@@ -42,9 +54,12 @@ object FabricApi {
     }
 
     private fun install(request: Request) {
-        val version = Modrinth.versions(PROJECT).firstOrNull { candidate ->
-            request.mcVersion in candidate.gameVersions && candidate.loaders.any { it in LOADERS }
-        } ?: return
+        val candidates = Modrinth.versions(PROJECT)
+        val version = candidates.firstOrNull { it.id == request.apiVersionId }
+            ?: candidates.firstOrNull { candidate ->
+                request.mcVersion in candidate.gameVersions && candidate.loaders.any { it in LOADERS }
+            }
+            ?: return
         val file = version.files.firstOrNull() ?: return
 
         val dir = File(request.gameDir, ModKind.MOD.dir)
