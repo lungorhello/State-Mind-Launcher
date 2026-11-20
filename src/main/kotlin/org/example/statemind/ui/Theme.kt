@@ -20,11 +20,16 @@ object Theme {
     /** 强调色上的文字：比主色再深一档，压在淡紫底上才读得清。 */
     const val ACCENT_TEXT = "#6d28d9"
 
-    /** 选中项底色。 */
-    const val ACCENT_BG = "#efe6fd"
+    /**
+     * 选中项底色。
+     *
+     * 大块的底色要柔 —— 整张卡铺上去时，颜色一深就抢眼，用户先看到色块再看到内容。
+     * 这一档接近下载页卡片悬停时的 `#faf9ff`：看得出是「被选中了」，但不刺眼。
+     */
+    const val ACCENT_BG = "#f7f3fe"
 
     /** 主色描边（淡）：卡片、竖条这类只用它勾边。 */
-    const val ACCENT_LINE = "#cdb6f2"
+    const val ACCENT_LINE = "#ded3f6"
 
     /** 主色淡档，用在面积大的块上比主色柔。 */
     const val ACCENT_SOFT = "#a78bfa"
