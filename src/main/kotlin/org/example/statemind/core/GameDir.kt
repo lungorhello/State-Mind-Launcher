@@ -103,7 +103,16 @@ object GameDir {
         return root
     }
 
-    private val VERSION_DIRS = listOf("mods", "saves", "resourcepacks", "logs", "crash-reports", "screenshots")
+    /**
+     * 版本隔离目录里那几层「游戏自己会往里读」的文件夹。
+     *
+     * 下载完成时就照着建齐，而不是等第一次启动：用户装完通常会先去看 mods 在不在、
+     * 光影该丢哪 —— 目录不在，只能自己新建，还得猜名字。
+     */
+    private val VERSION_DIRS = listOf(
+        "mods", "saves", "resourcepacks", "shaderpacks", "datapacks", "config",
+        "logs", "crash-reports", "screenshots"
+    )
 
     /** 版本隔离：给该版本目录建自己的 mods / saves / resourcepacks。 */
     fun ensureVersion(versionDir: File) {
