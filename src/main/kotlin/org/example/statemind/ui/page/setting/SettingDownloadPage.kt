@@ -143,6 +143,9 @@ class SettingDownloadPage : Page {
             commit.playFromStart()
         }
 
+        // maxWidth 只是上限，HBox 不会因此把滑条拉长：不给 HGrow 它就只占自己的首选宽度
+        // （一百来像素），整条缩在左边一小截。让它吃满，数值用固定宽度挂在右边。
+        HBox.setHgrow(slider, Priority.ALWAYS)
         return HBox(12.0, slider, readout).apply { alignment = Pos.CENTER_LEFT }
     }
 
