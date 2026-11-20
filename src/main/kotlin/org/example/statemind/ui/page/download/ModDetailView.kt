@@ -136,45 +136,79 @@ internal class ModDetailView(
         val versions: List<Modrinth.Version>
     )
 
-    private val iconBox = StackPane()
+    /** 项目图标的位置。尺寸写死 —— 图是异步到的，不固定的话卡片高度会跟着抖一下。 */
+    private val iconBox = StackPane().apply {
+        minWidth = ICON_SIZE
+        prefWidth = ICON_SIZE
+        maxWidth = ICON_SIZE
+        minHeight = ICON_SIZE
+        prefHeight = ICON_SIZE
+        maxHeight = ICON_SIZE
+    }
     private val title = Label().apply {
         style = "-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: ${DownloadStyles.TEXT};"
         // 一行放不下就省略，不折到第二行 —— 折下去会把简介挤走
         isWrapText = false
         textOverrun = OverrunStyle.ELLIPSIS
-        maxWidth = 420.0
+        // 宽度按窗体算，不写死上限：写死了窄窗口就会提前截断、宽窗口又放不下
+        maxWidth = Double.MAX_VALUE
+        // 默认的最小宽度是文字全宽，不放开的话它会反过来把右侧内容挤出容器
         minWidth = 0.0
     }
-    /** 作者名。PCL 那行没有，但这是项目归属，丢了就得回去列表页找。 */
-    private val authorLabel = Label().apply { style = Typo.NOTE }
-
     /**
      * 简介。**只占一行**，放不下就省略号 —— PCL 就是这样，
      * 折成两行会把下面那排元信息顶下去，页面反而变长。
      *
-     * [maxWidth] 必须是有限值：Label 只有在宽度真的不够时才画省略号，
-     * 给成「无限宽」的话它会按文字全宽要空间，永远不会截断。
-     * [minWidth] 给 0：默认的最小宽度是文字全宽，不放开的话它会反过来把标题挤出卡片。
+     * [maxWidth] 留成「无限宽」：宽度按窗体算，不写死上限。
+     * 真正让它画省略号的是 [textOverrun] + 容器给的宽度 ——
+     * Label 拿到多宽就画多宽，放不下时用省略号收尾。
      */
     private val desc = Label().apply {
         style = Typo.DIM
         isWrapText = false
         textOverrun = OverrunStyle.ELLIPSIS
-        maxWidth = 620.0
+        maxWidth = Double.MAX_VALUE
+        // 默认的最小宽度是文字全宽，不放开的话它会反过来把标题挤出卡片
         minWidth = 0.0
     }
 
-    /** 分类小标签（PCL 在简介前面挂的那一串）。 */
+    /**
+     * 分类小标签。PCL 把它排在元信息那一排的第一项（分类 · 下载量 · 更新时间 · 平台）。
+     */
     private val catTag = Label().apply {
         style = "-fx-font-size: 12px; -fx-text-fill: ${DownloadStyles.ACCENT_TEXT};" +
                 "-fx-background-color: ${DownloadStyles.ACCENT_BG};" +
                 "-fx-background-radius: 4; -fx-padding: 1 6 1 6;"
-        isVisible = false
-        isManaged = false
     }
 
-    /** 那一排元信息：支持版本 / 下载量 / 最近更新 / 平台，每项前面一个小图标。 */
-    private val metaRow = HBox(14.0)
+    /**
+     * 那一排元信息：分类 / 支持版本 / 下载量 / 最近更新 / 平台 / 作者。
+     *
+     * 用 FlowPane 而不是 HBox：窗口一窄，HBox 会把几项挤成一团（甚至溢出卡片），
+     * FlowPane 至少不会溢出。间距也开得松一些 —— PCL 那排就是散开的。
+     * 窄到连一行都放不下时，按重要度隐藏次要项（见 [applyShrink]）。
+     */
+    private val metaRow = FlowPane().apply {
+        hgap = 20.0
+        vgap = 6.0
+        alignment = Pos.TOP_LEFT
+    }
+
+    /**
+     * 元信息各项，按重要度排（数字小的先保留）。
+     *
+     * 重新排版时会重建，所以每次都重写一份。
+     *
+     * 元素类型是 [Region] 而不是 Node —— 要量宽度就得用 prefWidth，
+     * 那是 Region 才有的方法。
+     */
+    private val metaItems = ArrayList<Pair<Region, Int>>()
+
+    /**
+     * 按钮那一行，同样按重要度排：转到 Modrinth 最重要（它是这页的主要动作），
+     * 「复制名称」其次，「返回」最次 —— 窄到不行时它还有左上角那颗叉号兜着。
+     */
+    private val actionItems = ArrayList<Pair<Region, Int>>()
 
     private val openButton = Button("转到 Modrinth").apply {
         style = BTN_GHOST
@@ -280,22 +314,22 @@ internal class ModDetailView(
             padding = Insets(2.0, 0.0, 0.0, 0.0)
         }
 
-        // 标题一行：标题 + 作者。PCL 只有标题，作者跟在后面，不另起一行。
-        val titleLine = HBox(8.0, title, authorLabel).apply {
+        // 标题一行。作者挪到下面的元信息排（PCL 那排也是这么摆的），
+        // 标题独占一行才能按窗体宽度收缩 —— 挤着两个元素时它没法省略。
+        val titleLine = HBox(8.0, title).apply {
             alignment = Pos.CENTER_LEFT
             minWidth = 0.0
         }
-        title.minWidth = 0.0
-        title.textOverrun = OverrunStyle.ELLIPSIS
-        // 简介一行：分类小标签 + 简介（放不下省略号）。
-        val descLine = HBox(8.0, catTag, desc).apply {
+        HBox.setHgrow(title, Priority.ALWAYS)
+        // 简介一行：只有简介。分类挪到下面的元信息排（PCL 那排的第一项就是它）。
+        val descLine = HBox(8.0, desc).apply {
             alignment = Pos.CENTER_LEFT
             minWidth = 0.0
         }
         HBox.setHgrow(desc, Priority.ALWAYS)
 
-        // 图标 + 三行字：标题 / 简介 / 元信息。挤成一列，像 PCL 那样整块压在左上角。
-        val info = VBox(4.0, titleLine, descLine, metaRow).apply { minWidth = 0.0 }
+        // 图标 + 两行字：标题 / 简介。挤成一列，像 PCL 那样整块压在左上角。
+        val info = VBox(4.0, titleLine, descLine).apply { minWidth = 0.0 }
         HBox.setHgrow(info, Priority.ALWAYS)
 
         val identity = HBox(12.0, iconBox, info).apply {
@@ -308,11 +342,21 @@ internal class ModDetailView(
         val actionRow = HBox(8.0, backButton, openButton, copyButton).apply {
             alignment = Pos.CENTER_LEFT
         }
+        // 窄了先藏「返回」（左上角还有叉号），再藏「复制名称」，「转到 Modrinth」留着。
+        actionItems += openButton to 0
+        actionItems += copyButton to 1
+        actionItems += backButton to 2
 
-        val headerCard = VBox(12.0, HBox(4.0, slot, identity), actionRow).apply {
+        // 元信息与按钮这两行横跨整张卡片，左边缘跟图标对齐（PCL 就是这么摆的）：
+        // 它们不是标题的续行，是卡片自己的两行。左边空出的正好是叉号那条窄槽。
+        // 缩进 = 叉号槽的宽度 + 它跟内容的间距，让这两行的起点落在图标的左边缘。
+        val indent = Insets(0.0, 0.0, 0.0, SLOT_WIDTH + 4.0)
+        val headerCard = VBox(12.0, HBox(4.0, slot, identity), metaRow, actionRow).apply {
             alignment = Pos.TOP_LEFT
-            padding = Insets(14.0)
+            padding = Insets(CARD_PADDING)
             style = DownloadStyles.CARD
+            VBox.setMargin(metaRow, indent)
+            VBox.setMargin(actionRow, indent)
         }
 
         val filterCard = VBox(8.0, chipsBox).apply {
@@ -329,6 +373,14 @@ internal class ModDetailView(
             vbarPolicy = ScrollPane.ScrollBarPolicy.AS_NEEDED
             style = "-fx-background-color: transparent; -fx-background: transparent;" +
                     "-fx-border-color: transparent; -fx-padding: 0;"
+        }
+
+        // 窗体一改大小就重新算一遍该藏哪些。
+        // 延后一拍再算：视口宽度是在布局之后才定下来的，此刻读还是上一帧的旧值。
+        // 监听 boundsInLocal —— ScrollPane 没有公开的 widthProperty，
+        // viewportBoundsProperty() 又是受保护成员，外部调不到。
+        scroll.boundsInLocalProperty().addListener { _, _, _ ->
+            Platform.runLater { applyShrink() }
         }
 
         val body = StackPane(scroll, busyBox).apply { VBox.setVgrow(this, Priority.ALWAYS) }
@@ -356,9 +408,12 @@ internal class ModDetailView(
         zhName = builtin.takeIf { it != hit.title }
         applyTitle()
         if (zhName == null) lookupZh(hit, mine)
-        authorLabel.text = hit.author
         desc.text = hit.description
-        iconBox.children.setAll(ModIcons.view(hit.iconUrl, 44.0))
+        iconBox.children.setAll(ModIcons.view(hit.iconUrl, ICON_SIZE))
+        // 先把上一个项目留下的详情清掉，否则这一帧会画出上一个项目的加载器和更新时间。
+        projectUpdated = null
+        projectLoaders = emptyList()
+        projectGameVersions = emptyList()
         paintCategory(hit)
         paintMeta(hit)
 
@@ -371,11 +426,12 @@ internal class ModDetailView(
         skeletonChips()
         setBusy(true)
 
+        // 这次开的是新项目，得按当前窗宽重新算一遍该藏哪些。
+        // 延后一拍：视口宽度此刻还是上一帧的旧值。
+        Platform.runLater { applyShrink() }
+
         // 搜索结果里没有加载器和更新时间，单独问一次项目详情。
         // 问不到也不碍事 —— 元信息那排少了这两项照样看。
-        projectUpdated = null
-        projectLoaders = emptyList()
-        projectGameVersions = emptyList()
         Thread {
             val detail = runCatching { Modrinth.project(hit.id) }.getOrNull()
             Platform.runLater {
@@ -787,43 +843,126 @@ internal class ModDetailView(
     private fun paintCategory(hit: Modrinth.Hit) {
         val tag = hit.categories.firstOrNull { ModCategories.isFunction(it) }
         catTag.text = tag?.let { ModCategories.zh(it) }.orEmpty()
-        catTag.isVisible = tag != null
-        catTag.isManaged = tag != null
     }
 
     /**
-     * 元信息那一排：支持版本 / 下载量 / 最近更新 / 平台。
+     * 元信息那一排：分类 / 支持版本 / 下载量 / 最近更新 / 平台 / 作者。
      *
-     * 跟 PCL 一样一排摆开，每项前面一个小图标。
-     * 加载器和更新日期要项目详情才给全（搜索结果里没有），所以先摆已有的，
-     * 详情回来再补 —— 补的过程界面上不闪。
+     * 这排东西纯属装饰 —— 算不出来就不显示，但**不能因此让详情页打不开**。
+     * 之前用 `Duration.between` 算天数就炸过一次（LocalDate 没有时分秒），
+     * 异常一路抛到事件线程，页面直接卡住进不去。
      */
     private fun paintMeta(hit: Modrinth.Hit) {
+        try {
+            buildMeta(hit)
+        } catch (error: Throwable) {
+            metaRow.children.clear()
+        }
+    }
+
+    private fun buildMeta(hit: Modrinth.Hit) {
         val items = ArrayList<javafx.scene.Node>()
+        metaItems.clear()
+
+        // 分类（PCL 那排的第一项）
+        if (catTag.text.isNotBlank()) {
+            items += catTag
+            metaItems += catTag to 2
+        }
 
         val support = supportText(hit)
         if (support.isNotBlank()) {
-            items += metaItem(
+            val node = metaItem(
                 NavIcons.packageIcon(13.0, Color.web(DownloadStyles.TEXT_DIM)),
                 support
             )
+            items += node
+            metaItems += node to 1
         }
-        items += metaItem(
+        val downloads = metaItem(
             NavIcons.download(13.0, Color.web(DownloadStyles.TEXT_DIM)),
             downloadsText(hit.downloads)
         )
+        items += downloads
+        metaItems += downloads to 0
+
         projectUpdated?.let {
-            items += metaItem(
+            val node = metaItem(
                 NavIcons.clock(13.0, Color.web(DownloadStyles.TEXT_DIM)),
                 relativeDate(it)
             )
+            items += node
+            metaItems += node to 3
         }
-        items += metaItem(
+        val platform = metaItem(
             NavIcons.globe(13.0, Color.web(DownloadStyles.TEXT_DIM)),
             "Modrinth"
         )
+        items += platform
+        metaItems += platform to 4
+
+        // 作者放最后 —— 是个名字，不是数据
+        hit.author.takeIf { it.isNotBlank() }?.let {
+            val node = metaItem(
+                NavIcons.person(13.0, Color.web(DownloadStyles.TEXT_DIM)),
+                it
+            )
+            items += node
+            metaItems += node to 5
+        }
 
         metaRow.children.setAll(*items.toTypedArray())
+        applyShrink()
+    }
+
+    /**
+     * 窗体窄了就藏掉次要项。
+     *
+     * 元信息那一排有六项，加上按钮一排三枚 —— 窗口一窄就挤到卡片外面去了。
+     * 这里按重要度从低到高逐个藏：先藏作者，再藏更新时间、平台……
+     * 直到剩下的能一行放下。
+     *
+     * 宽度取 [scroll] 的视口宽（卡片撑满视口），不是卡片自己的 prefWidth ——
+     * 用后者会算出一开始就「放不下」的假象。
+     * 还要减掉卡片自身的内边距和这两行左边的缩进 —— 那部分已经不占地方了。
+     */
+    private fun applyShrink() {
+        val viewport = scroll.viewportBounds.width
+        if (viewport <= 0.0) return
+        // 卡片内边距 14×2，加上这两行左边的缩进（叉号槽 + 间距）
+        val available = viewport - CARD_PADDING * 2 - (SLOT_WIDTH + 4.0)
+
+        // 元信息：FlowPane 里各项宽度就是各自的 prefWidth
+        val metaWidth = { node: Region ->
+            node.layoutBounds.width.takeIf { it > 0.0 } ?: node.prefWidth(-1.0)
+        }
+        metaItems.sortedByDescending { it.second }.forEach { (node, _) ->
+            node.isVisible = true
+            node.isManaged = true
+        }
+        var used = metaRow.children.filterIsInstance<Region>().sumOf { metaWidth(it) } +
+                META_GAP * (metaItems.size - 1).coerceAtLeast(0)
+        metaItems.sortedByDescending { it.second }.forEach { (node, priority) ->
+            if (used <= available) return@forEach
+            if (priority <= 1) return@forEach          // 下载量 / 支持版本是核心，不藏
+            node.isVisible = false
+            node.isManaged = false
+            used -= metaWidth(node) + META_GAP
+        }
+
+        // 按钮：返回最次（还有左上角的叉号兜底），复制名称其次
+        actionItems.forEach { (node, _) ->
+            node.isVisible = true
+            node.isManaged = true
+        }
+        var usedButtons = actionItems.sumOf { it.first.prefWidth(-1.0) } + ACTION_GAP * (actionItems.size - 1).coerceAtLeast(0)
+        actionItems.sortedByDescending { it.second }.forEach { (node, priority) ->
+            if (usedButtons <= available) return@forEach
+            if (priority <= 0) return@forEach            // 「转到 Modrinth」是主要动作，不藏
+            node.isVisible = false
+            node.isManaged = false
+            usedButtons -= node.prefWidth(-1.0) + ACTION_GAP
+        }
     }
 
     /**
@@ -861,10 +1000,14 @@ internal class ModDetailView(
      *
      * Modrinth 的 updated 只给到日期，比不出来具体多久 —— 说「8 天前」是按天算的。
      * 超过一年就直接写日期，写「一年前」没意思。
+     *
+     * 天数用 [ChronoUnit.DAYS] 算，不能用 `Duration.between` ——
+     * 后者要的是「时刻」级的差，`LocalDate` 没有时分秒，会抛
+     * `UnsupportedTemporalTypeException`。
      */
     private fun relativeDate(date: String): String {
         val parsed = runCatching { java.time.LocalDate.parse(date) }.getOrNull() ?: return date
-        val days = java.time.Duration.between(parsed, java.time.LocalDate.now()).toDays()
+        val days = java.time.temporal.ChronoUnit.DAYS.between(parsed, java.time.LocalDate.now())
         return when {
             days <= 0L -> "今天更新"
             days < 30L -> "$days 天前更新"
@@ -886,6 +1029,21 @@ internal class ModDetailView(
     }
 
     private companion object {
+
+        /** 项目图标的边长。 */
+        const val ICON_SIZE = 48.0
+
+        /** 叉号那条窄槽的宽度。 */
+        const val SLOT_WIDTH = 16.0
+
+        /** 元信息各项之间的间距（跟 FlowPane 的 hgap 一致）。 */
+        const val META_GAP = 20.0
+
+        /** 按钮之间的间距。 */
+        const val ACTION_GAP = 8.0
+
+        /** 头部卡片的内边距。 */
+        const val CARD_PADDING = 14.0
 
         /** 分组标题一次铺多少个。 */
         const val GROUP_BATCH = 30
