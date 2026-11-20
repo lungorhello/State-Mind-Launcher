@@ -56,6 +56,15 @@ object Dialogs {
     fun error(title: String, body: String) = notify(Kind.ERROR, title, body)
 
     /**
+     * 详情弹窗：正文一行说清「主要出了什么事」，下面挂一个自己做的列表控件
+     * （比如下载任务的逐阶段结果）。
+     *
+     * [content] 通常已经自带滚动；弹窗本身不再套一层滚动。
+     */
+    fun detail(title: String, body: String, content: Node) =
+        present(Kind.ERROR, title, body, content, "知道了", null, null, contentHeight = DETAIL_HEIGHT) {}
+
+    /**
      * 确认框，点确定才走 [onConfirm]。
      *
      * [extra] 挂附加控件（如「不再提醒」勾选框），在 [onConfirm] 里自己读状态。
@@ -140,7 +149,11 @@ object Dialogs {
             // 只有滚动容器吃剩余高度：普通 Label 被 VBox 拉满后文字会垂直居中。
             if (node is ScrollPane) VBox.setVgrow(node, Priority.ALWAYS)
         }
-        content?.let { area.children += it }
+        content?.let { node ->
+            area.children += node
+            // 列表类的附加控件自己带滚动，得让它吃掉剩余高度，否则被压成一行
+            if (node is ScrollPane) VBox.setVgrow(node, Priority.ALWAYS)
+        }
 
         val buttons = HBox(10.0).apply { alignment = Pos.CENTER_RIGHT }
         cancelText?.let { text ->
@@ -249,6 +262,9 @@ object Dialogs {
 
     /** 标题 + 正文 + 附加控件那块的高度，写死让按钮永远停在同一个位置。 */
     private const val CONTENT_HEIGHT = 132.0
+
+    /** 详情弹窗的高度：正文一行 + 一份逐条列表。 */
+    private const val DETAIL_HEIGHT = 320.0
 
     private const val TOP_BAR_HEIGHT = 4.0
 
