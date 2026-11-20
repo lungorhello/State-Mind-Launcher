@@ -435,6 +435,17 @@ class SettingInstancePage : Page {
      * 只会让「点了没反应」成为最常见的结局 —— 名字对不上时按钮是灰的，连报错都没有。
      */
     private fun askDeleteVersion(v: InstanceScan.Version) {
+        // 被别的版本继承的那份（通常是原版）不能删：它只是「原版材料」，界面上看着像个普通版本，
+        // 一删所有子版本都起不来，而且没人会想到去回收站找还原。
+        val dependents = InstanceScan.dependentsOf(v.dir, v.id)
+        if (dependents.isNotEmpty()) {
+            Dialogs.error(
+                "无法删除",
+                "「${v.id}」被 ${dependents.size} 个版本继承：" +
+                        "${dependents.joinToString("、")}。\n删除后这些版本无法启动，请先删除它们。"
+            )
+            return
+        }
         Dialogs.confirm(
             title = "删除版本",
             body = "将把 versions/${v.id} 整个文件夹移到回收站，可以从回收站还原。",
