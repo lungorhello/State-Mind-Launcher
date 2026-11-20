@@ -16,6 +16,7 @@ import javafx.scene.layout.VBox
 import org.example.statemind.core.download.DownloadCenter
 import org.example.statemind.core.download.DownloadJob
 import org.example.statemind.core.mod.InstallLog
+import org.example.statemind.ui.Dialogs
 import org.example.statemind.ui.Page
 import org.example.statemind.ui.Typo
 
@@ -161,6 +162,14 @@ private class JobRow(private val job: DownloadJob) : VBox(8.0) {
 
     private val detail = Label().apply { style = Typo.NOTE }
 
+    /** 失败时才出现：点开看逐阶段的情况。 */
+    private val more = Button("查看详情").apply {
+        style = MORE_STYLE
+        isVisible = false
+        isManaged = false
+        setOnAction { showDetail() }
+    }
+
     init {
         val head = HBox(
             8.0,
@@ -174,7 +183,7 @@ private class JobRow(private val job: DownloadJob) : VBox(8.0) {
         val barRow = HBox(8.0, bar, percent).apply { alignment = Pos.CENTER_LEFT }
         HBox.setHgrow(bar, Priority.ALWAYS)
 
-        children.setAll(head, barRow, stageBox, detail)
+        children.setAll(head, barRow, stageBox, detail, more)
         padding = Insets(12.0)
         style = CARD_STYLE
     }
@@ -210,6 +219,35 @@ private class JobRow(private val job: DownloadJob) : VBox(8.0) {
             else -> "${bytes(job.doneBytes)} / ${bytes(job.totalBytes)} · $counts" +
                     if (job.bytesPerSecond > 0) " · ${bytes(job.bytesPerSecond)}/s" else ""
         }
+
+        val showMore = job.state == DownloadJob.State.FAILED
+        more.isVisible = showMore
+        more.isManaged = showMore
+    }
+
+    /** 失败详情：一条主要原因 + 逐阶段的情况。 */
+    private fun showDetail() {
+        val stages = job.stages.sortedBy { it.order }
+        val list = VBox(6.0).apply {
+            children += stages.map { stage ->
+                HBox(8.0, Label(stage.title).apply { style = Typo.NOTE; minWidth = 150.0 },
+                    Label(stage.error.ifBlank { stage.status }).apply {
+                        style = if (stage.status == "失败") FAIL_NOTE else Typo.NOTE
+                    })
+            }
+        }
+        val scroll = ScrollPane(list).apply {
+            isFitToWidth = true
+            hbarPolicy = ScrollPane.ScrollBarPolicy.NEVER
+            vbarPolicy = ScrollPane.ScrollBarPolicy.AS_NEEDED
+            style = "-fx-background-color: transparent; -fx-background: transparent;" +
+                    "-fx-border-color: transparent; -fx-padding: 0;"
+        }
+        Dialogs.detail(
+            "下载未完成",
+            job.mainReason.ifBlank { "有文件没能下载下来" },
+            scroll
+        )
     }
 
     private companion object {
@@ -324,6 +362,12 @@ private const val CANCEL_STYLE =
             "-fx-border-radius: 6; -fx-background-radius: 6;" +
             "-fx-text-fill: #52525b; -fx-font-size: 12px; -fx-padding: 3 10 3 10;" +
             "-fx-cursor: hand;"
+
+private const val MORE_STYLE =
+    "-fx-background-color: transparent; -fx-border-color: transparent; -fx-border-width: 0;" +
+            "-fx-text-fill: #6d28d9; -fx-font-size: 12px; -fx-padding: 0; -fx-cursor: hand;"
+
+private const val FAIL_NOTE = "-fx-font-size: 12px; -fx-text-fill: #dc2626;"
 
 private fun bytes(value: Long): String = when {
     value <= 0L -> "0 B"
