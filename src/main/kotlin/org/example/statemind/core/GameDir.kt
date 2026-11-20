@@ -51,8 +51,20 @@ object GameDir {
      */
     fun installShapeOf(root: File): InstallShape {
         if (GameDirStore.isBuiltin(root.absolutePath)) return InstallShape.SHARED
-        if (analyze(root).type == Type.MULTIMC) return InstallShape.SHARED
+        if (isMultiLayout(root)) return InstallShape.SHARED
         return InstallShape.SELF_CONTAINED
+    }
+
+    /**
+     * root 自己或它的上一级是不是 multi 系。
+     *
+     * multi 的实例目录本身长得跟传统目录一样（里面就是一份 `minecraft/`），
+     * 只认 `instances/` 会漏掉「用户钉的是某个实例里的那份」—— 而这正是最容易踩的一种。
+     */
+    fun isMultiLayout(root: File): Boolean {
+        if (analyze(root).type == Type.MULTIMC) return true
+        val parent = root.absoluteFile.parentFile ?: return false
+        return File(parent, "instance.cfg").isFile || File(parent, "mmc-pack.json").isFile
     }
 
     /**
