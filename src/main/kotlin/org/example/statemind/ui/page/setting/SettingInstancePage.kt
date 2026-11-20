@@ -22,10 +22,12 @@ import javafx.stage.Window
 import org.example.statemind.core.GameDir
 import org.example.statemind.core.GameDirStore
 import org.example.statemind.core.InstanceScan
+import org.example.statemind.core.Prefs
 import org.example.statemind.core.RecycleBin
 import org.example.statemind.ui.Dialogs
 import org.example.statemind.ui.NavIcons
 import org.example.statemind.ui.Page
+import java.awt.Desktop
 import java.io.File
 import java.util.concurrent.Callable
 
@@ -36,6 +38,7 @@ import java.util.concurrent.Callable
  *   1. 顶部一行 —— 「添加游戏目录」按钮 + 排列方式下拉（一行一个 / 一行两个）；
  *   2. 下面按目录分组 —— 每组标题是目录昵称（multi 系按实例拆成多组，标题是「昵称 · 实例名」），
  *      组内一个版本一张卡片：左边图标（占位方块）、右边版本名 + 描述（加载器 · 版本号）。
+ *      组标题右侧两个图标按钮：图钉（钉为默认下载位置，新版本装到这里）、文件夹（资源管理器打开）。
  *
  * 添加流程（[askDirectory]）：「选择文件夹 + 起个名字」→ 点「下一步」当场验证是不是 Minecraft 目录
  * （传统目录 / multi 系都收，见 [GameDir.resolve]）→ 成功弹窗报出识别结果和版本数，
@@ -153,7 +156,7 @@ class SettingInstancePage : Page {
             if (g.type == GameDir.Type.EMPTY) g.type.label
             else "${g.type.label} · ${g.versions.size} 个版本"
         ).apply { style = "-fx-font-size: 12px; -fx-text-fill: #9a9aa0;" }
-        val header = HBox(10.0, nameBox, note).apply { alignment = Pos.CENTER_LEFT }
+        val header = HBox(10.0, nameBox, note, pinButton(g), folderButton(g)).apply { alignment = Pos.CENTER_LEFT }
         if (removable) {
             header.children += Button("移除").apply {
                 style = BTN_GHOST_SMALL
@@ -469,6 +472,75 @@ class SettingInstancePage : Page {
     }
 
     // ---------- 小工具 ----------
+
+    /**
+     * 这份目录是不是「默认下载位置」。没钉过就是内置那份 —— 保证任何时刻都有个确定的落点，
+     * 不会因为首页当时选了别的目录就装到别人家去。
+     */
+    private fun isDefaultDownloadDir(path: String): Boolean {
+        val pinned = Prefs.downloadDir
+        return if (pinned.isBlank()) GameDirStore.isBuiltin(path) else path.equals(pinned, ignoreCase = true)
+    }
+
+    /** 图钉：钉住 = 紫的，再点没有动作；没钉 = 灰的，点一下改成这份目录。 */
+    private fun pinButton(g: InstanceScan.Directory): Button {
+        val pinned = isDefaultDownloadDir(g.rootPath)
+        val idle = Color.web(if (pinned) "#7c3aed" else "#8b8b93")
+        val icon = NavIcons.pin(15.0, idle)
+        return iconButton(
+            icon = icon,
+            idle = idle,
+            hover = if (pinned) idle else Color.web("#7c3aed"),
+            tip = if (pinned) "默认下载位置" else "设为默认下载位置"
+        ) {
+            if (pinned) return@iconButton
+            Prefs.downloadDir = g.rootPath
+            // 只重铺，不重扫：图钉颜色跟着换，磁盘没动
+            layoutGroups()
+        }
+    }
+
+    /** 文件夹：资源管理器打开这份目录。目录不在了就什么都不做（组标题已经写着「路径不存在」）。 */
+    private fun folderButton(g: InstanceScan.Directory): Button {
+        val idle = Color.web("#8b8b93")
+        return iconButton(
+            icon = NavIcons.folder(15.0, idle),
+            idle = idle,
+            hover = Color.web("#7c3aed"),
+            tip = "打开文件夹"
+        ) { openFolder(g.rootPath) }
+    }
+
+    private fun openFolder(path: String) {
+        val dir = File(path)
+        if (!dir.isDirectory) return
+        runCatching { Desktop.getDesktop().open(dir) }
+    }
+
+    /** 30×30 的纯图标按钮：悬停换色，用途写在 Tooltip 里（图标本身不保证一看就懂）。 */
+    private fun iconButton(
+        icon: NavIcons.Icon,
+        idle: Color,
+        hover: Color,
+        tip: String,
+        action: () -> Unit
+    ): Button = Button().apply {
+        graphic = icon.node
+        contentDisplay = ContentDisplay.GRAPHIC_ONLY
+        tooltip = Tooltip(tip)
+        minWidth = 30.0
+        prefWidth = 30.0
+        minHeight = 30.0
+        prefHeight = 30.0
+        style = """
+            -fx-background-color: transparent;
+            -fx-background-radius: 6;
+            -fx-cursor: hand;
+        """.trimIndent()
+        setOnMouseEntered { icon.color = hover }
+        setOnMouseExited { icon.color = idle }
+        setOnAction { action() }
+    }
 
     private fun field(labelText: String, control: Node): VBox = VBox(
         6.0,
