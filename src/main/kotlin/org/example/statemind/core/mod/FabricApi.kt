@@ -20,6 +20,12 @@ object FabricApi {
     /** Quilt 能直接吃 Fabric 的模组，Fabric API 同样可装。 */
     private val LOADERS = setOf("fabric", "quilt")
 
+    /**
+     * 整个项目的版本表。拉一次几百 KB，够慢 —— 缓存住，换游戏版本时不必重拉。
+     */
+    @Volatile
+    private var cachedAll: List<Modrinth.Version>? = null
+
     /** 解析出来的那一个文件：下哪儿、多大、校验值。 */
     class Resolved(
         val url: String,
@@ -35,10 +41,12 @@ object FabricApi {
      * 界面要在「选了哪个加载器版本」之后把这张卡片显示出来，所以查询是公开的；
      * 真正安装时再按 id 找一次 —— 中间可能过了几分钟，列表未必还是那份。
      */
-    fun versionsFor(mcVersion: String): List<Modrinth.Version> =
-        Modrinth.versions(PROJECT).filter { version ->
+    fun versionsFor(mcVersion: String): List<Modrinth.Version> {
+        val all = cachedAll ?: Modrinth.versions(PROJECT).also { cachedAll = it }
+        return all.filter { version ->
             mcVersion in version.gameVersions && version.loaders.any { it in LOADERS }
         }
+    }
 
     /**
      * 定下要装的那一个 Fabric API 文件。
@@ -51,7 +59,7 @@ object FabricApi {
             Modrinth.version(apiVersionId)
         } else {
             null
-        } ?: Modrinth.versions(PROJECT).firstOrNull { candidate ->
+        } ?: (cachedAll ?: Modrinth.versions(PROJECT).also { cachedAll = it }).firstOrNull { candidate ->
             mcVersion in candidate.gameVersions && candidate.loaders.any { it in LOADERS }
         } ?: return null
         val file = version.files.firstOrNull() ?: return null
