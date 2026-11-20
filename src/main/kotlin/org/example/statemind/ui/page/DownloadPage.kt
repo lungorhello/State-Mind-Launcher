@@ -8,6 +8,7 @@ import javafx.scene.control.Label
 import javafx.scene.layout.Priority
 import javafx.scene.layout.StackPane
 import javafx.scene.layout.VBox
+import org.example.statemind.core.GameDir
 import org.example.statemind.core.GameDirStore
 import org.example.statemind.core.InstanceScan
 import org.example.statemind.core.LaunchSelection
@@ -18,6 +19,7 @@ import org.example.statemind.core.VersionEntry
 import org.example.statemind.core.download.DownloadCenter
 import org.example.statemind.core.mod.InstallTargets
 import org.example.statemind.core.mod.ModKind
+import org.example.statemind.ui.Dialogs
 import org.example.statemind.ui.Page
 import org.example.statemind.ui.Typo
 import org.example.statemind.ui.page.download.DownloadStyles
@@ -224,9 +226,16 @@ class DownloadPage(private val onOpenTasks: () -> Unit = {}) : Page {
     /** 「开始下载」：登记一个下载任务，退回列表，再跳到任务页看进度。 */
     private fun startDownload() {
         val entry = install.current ?: return
-        // 装进首页当前选中的那份游戏目录。写死内置目录的话，多目录（multi 系 / 用户自加）
-        // 场景下版本会落到别处，跟随后装模组用的隔离目录彻底分家。
         val root = gameRoot()
+        // multi 的版本由它自己按 patches 管理，往它的 versions/ 里塞一份它认不出来，
+        // 下次启动还可能被它重建。社区资源那边照旧能装 —— 那只是往目录里放文件。
+        if (GameDir.isMultiLayout(root)) {
+            Dialogs.warn(
+                "不支持 multi 格式下载",
+                "当前下载位置是 multi 系目录，它用自己的方式管理版本。\n请先把默认下载位置换成其它游戏目录。"
+            )
+            return
+        }
         DownloadCenter.submit(
             entry,
             root,
