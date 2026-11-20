@@ -222,7 +222,7 @@ internal object DownloadRunner {
     /**
      * 下一批文件。
      *
-     * 同一批里的文件**并行**下（能一起下的就一起下）；已经存在的（大小对得上就当没坏）
+     * 同一批里的文件**并行**下（能一起下的就一起下）；本地已有且校验得过的
      * 直接计入进度，不重下。
      */
     private fun downloadWave(
@@ -238,7 +238,9 @@ internal object DownloadRunner {
         for (run in runs) {
             if (run.state.status == "等待中") run.state.status = "下载中"
             for (item in run.files) {
-                if (item.target.isFile && item.size > 0L && item.target.length() == item.size) {
+                // 本地已有的先验一遍：大小对但内容坏掉的文件照样重下，
+                // 不然装上去才发现用不了（PCL 也对每个文件走校验，速度看着才均匀）。
+                if (Fetcher.usable(item)) {
                     run.skip(item)
                 } else {
                     pending += run to item
