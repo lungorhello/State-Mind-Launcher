@@ -121,7 +121,7 @@ class TaskPage : Page {
 /** 卡片左上角那个小标：一眼分清「这是整套版本」还是「这是某个模组」。 */
 private fun tag(text: String, project: Boolean): Label = Label(text).apply {
     style = if (project)
-        "-fx-font-size: 11px; -fx-text-fill: #6d28d9; -fx-background-color: #efe6fd;" +
+        "-fx-font-size: 11px; -fx-text-fill: #6d28d9; -fx-background-color: #f7f3fe;" +
                 "-fx-background-radius: 4; -fx-padding: 1 6 1 6;"
     else
         "-fx-font-size: 11px; -fx-text-fill: #52525b; -fx-background-color: #f2f2f5;" +
@@ -147,8 +147,17 @@ private class JobRow(private val job: DownloadJob) : VBox(8.0) {
         prefHeight = 6.0
     }
 
-    /** 分进度：同时下几个文件就列几行，最多 [MAX_FILE_LINES] 行。 */
-    private val fileLines = List(MAX_FILE_LINES) { FileLine() }
+    private val percent = Label().apply {
+        style = Typo.NOTE
+        minWidth = 40.0
+        alignment = Pos.CENTER_RIGHT
+    }
+
+    /** 阶段列表：下载原版资源 / 下载 Forge 主文件 / 安装 Forge … */
+    private val stageBox = VBox(4.0)
+
+    /** 已建出来的阶段行，按阶段对象认领。阶段会随下载往后加。 */
+    private val stageRows = HashMap<DownloadJob.StageState, StageRow>()
 
     private val detail = Label().apply { style = Typo.NOTE }
 
@@ -162,15 +171,18 @@ private class JobRow(private val job: DownloadJob) : VBox(8.0) {
             cancel
         ).apply { alignment = Pos.CENTER_LEFT }
 
-        children.setAll(head, bar)
-        fileLines.forEach { children += it }
-        children += detail
+        val barRow = HBox(8.0, bar, percent).apply { alignment = Pos.CENTER_LEFT }
+        HBox.setHgrow(bar, Priority.ALWAYS)
+
+        children.setAll(head, barRow, stageBox, detail)
         padding = Insets(12.0)
         style = CARD_STYLE
     }
 
     fun update() {
-        bar.progress = job.progress
+        val progress = job.progress
+        bar.progress = progress
+        percent.text = "${(progress * 100).toInt()}%"
         state.text = job.note
         state.style = when (job.state) {
             DownloadJob.State.DONE -> OK_STYLE
@@ -180,14 +192,13 @@ private class JobRow(private val job: DownloadJob) : VBox(8.0) {
         cancel.isVisible = !job.finished
         cancel.isManaged = !job.finished
 
-        // ConcurrentHashMap 的遍历顺序每次都变，按名字排一下，行才不会跳来跳去
-        val running = job.runningFiles.values.sortedBy { it.name }.take(MAX_FILE_LINES)
-        fileLines.forEachIndexed { index, line ->
-            val file = running.getOrNull(index)
-            line.isVisible = file != null
-            line.isManaged = file != null
-            if (file != null) line.show(file)
+        // 阶段是随下载往后加的，按 order 排好序再摆出来
+        val stages = job.stages.sortedBy { it.order }
+        val rows = stages.map { stage ->
+            stageRows.getOrPut(stage) { StageRow(stage) }
         }
+        rows.forEach { it.update() }
+        if (stageBox.children.toList() != rows) stageBox.children.setAll(rows)
 
         val counts = "${job.doneFiles} / ${job.totalFiles} 个文件"
         detail.text = when (job.state) {
@@ -202,22 +213,25 @@ private class JobRow(private val job: DownloadJob) : VBox(8.0) {
     }
 
     private companion object {
-        const val MAX_FILE_LINES = 4
         const val OK_STYLE = "-fx-font-size: 12px; -fx-text-fill: #16a34a;"
         const val FAIL_STYLE = "-fx-font-size: 12px; -fx-text-fill: #dc2626;"
     }
 }
 
-/** 一条文件分进度：文件名 + 细进度条，右侧是百分比。 */
-private class FileLine : HBox(8.0) {
+/** 一行阶段：标题 + 状态 + 细进度条 + 百分比。 */
+private class StageRow(private val stage: DownloadJob.StageState) : HBox(8.0) {
 
-    private val name = Label().apply {
+    private val name = Label(stage.title).apply {
         style = Typo.NOTE
-        maxWidth = Double.MAX_VALUE
+        minWidth = 150.0
+    }
+    private val status = Label().apply {
+        style = Typo.NOTE
+        minWidth = 52.0
     }
     private val bar = ProgressBar(0.0).apply {
-        prefWidth = 160.0
-        maxWidth = 160.0
+        prefWidth = 120.0
+        maxWidth = 120.0
         prefHeight = 4.0
     }
     private val percent = Label().apply {
@@ -229,16 +243,24 @@ private class FileLine : HBox(8.0) {
     init {
         alignment = Pos.CENTER_LEFT
         HBox.setHgrow(name, Priority.ALWAYS)
-        children.setAll(name, bar, percent)
-        isVisible = false
-        isManaged = false
+        children.setAll(name, status, bar, percent)
     }
 
-    fun show(file: DownloadJob.FileProgress) {
-        name.text = file.name
-        val progress = if (file.total <= 0L) 0.0 else (file.done.toDouble() / file.total).coerceIn(0.0, 1.0)
+    fun update() {
+        val progress = stage.progress
         bar.progress = progress
         percent.text = "${(progress * 100).toInt()}%"
+        status.text = when {
+            stage.status == "完成" -> ""
+            stage.status == "失败" -> "失败"
+            stage.stepTotal > 0 -> "${stage.stepDone}/${stage.stepTotal}"
+            else -> stage.status
+        }
+        status.style = if (stage.status == "失败") {
+            "-fx-font-size: 12px; -fx-text-fill: #dc2626;"
+        } else {
+            Typo.NOTE
+        }
     }
 }
 
