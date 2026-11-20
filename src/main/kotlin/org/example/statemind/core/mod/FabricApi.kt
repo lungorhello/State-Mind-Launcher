@@ -1,18 +1,16 @@
 package org.example.statemind.core.mod
 
-import java.io.File
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
 import org.example.statemind.core.Prefs
-import org.example.statemind.core.download.DownloadCenter
 import org.example.statemind.core.fileNameOf
 
 /**
- * 装完 Fabric / Quilt 版本之后，顺手把 Fabric API 放进 `mods/`。
+ * 装 Fabric / Quilt 版本时顺带把 Fabric API 放进 `mods/`。
  *
  * 它不是一个「可选的模组」，而是 Fabric 生态里几乎所有模组的前置依赖；
  * 装了加载器却没有它，用户下一分钟就会在启动器里看到一片模组加载失败。
- * 下载任务成功落地时才会触发 —— 版本本身都装失败了，再往里塞模组没有意义。
+ *
+ * 现在它是**下载计划里的一段**（见 `DownloadStages.FABRIC_API`），跟版本本体一起下、
+ * 一起显示进度 —— 不再是装完之后另开一个任务，免得用户以为版本已经齐了。
  */
 object FabricApi {
 
@@ -22,10 +20,14 @@ object FabricApi {
     /** Quilt 能直接吃 Fabric 的模组，Fabric API 同样可装。 */
     private val LOADERS = setOf("fabric", "quilt")
 
-    private class Request(val mcVersion: String, val gameDir: File, val apiVersionId: String?)
-
-    private val pending = ConcurrentHashMap<Long, Request>()
-    private val hooked = AtomicBoolean(false)
+    /** 解析出来的那一个文件：下哪儿、多大、校验值。 */
+    class Resolved(
+        val url: String,
+        val size: Long,
+        val sha1: String?,
+        /** 落盘文件名（已经按设置里的命名规则洗过）。 */
+        val targetName: String
+    )
 
     /**
      * 某个游戏版本能用的 Fabric API 版本，新在前。会阻塞，调用方扔后台线程。
@@ -38,33 +40,26 @@ object FabricApi {
             mcVersion in version.gameVersions && version.loaders.any { it in LOADERS }
         }
 
-    /** [jobId] 对应那次版本下载；它成功之后才去取 Fabric API。[apiVersionId] 为空就不装。 */
-    fun afterVersionInstall(jobId: Long, mcVersion: String, gameDir: File, apiVersionId: String?) {
-        if (apiVersionId.isNullOrBlank()) return
-        installHook()
-        pending[jobId] = Request(mcVersion, gameDir, apiVersionId)
-    }
-
-    private fun installHook() {
-        if (!hooked.compareAndSet(false, true)) return
-        DownloadCenter.onJobFinished { job ->
-            val request = pending.remove(job.id) ?: return@onJobFinished
-            Thread({ runCatching { install(request) } }, "fabric-api").apply { isDaemon = true }.start()
-        }
-    }
-
-    private fun install(request: Request) {
-        val candidates = Modrinth.versions(PROJECT)
-        val version = candidates.firstOrNull { it.id == request.apiVersionId }
-            ?: candidates.firstOrNull { candidate ->
-                request.mcVersion in candidate.gameVersions && candidate.loaders.any { it in LOADERS }
-            }
-            ?: return
-        val file = version.files.firstOrNull() ?: return
-
-        val dir = File(request.gameDir, ModKind.MOD.dir)
-        val name = fileNameOf(Prefs.resourceNaming, "Fabric API", file.fileName)
-        val entry = InstallLog.begin("Fabric API", ModKind.MOD, name, File(dir, name), file.size)
-        ModInstaller.install(dir, file, name, entry)
+    /**
+     * 定下要装的那一个 Fabric API 文件。
+     *
+     * [apiVersionId] 是安装页上选中的那个版本 id；为空时按 [mcVersion] 挑最新的兼容版本。
+     * 挑不出来返回 null —— 解析不了就不装这一段，前置缺了不该把整个版本下载判成失败。
+     */
+    fun resolve(mcVersion: String, apiVersionId: String?): Resolved? {
+        val version = if (!apiVersionId.isNullOrBlank()) {
+            Modrinth.version(apiVersionId)
+        } else {
+            null
+        } ?: Modrinth.versions(PROJECT).firstOrNull { candidate ->
+            mcVersion in candidate.gameVersions && candidate.loaders.any { it in LOADERS }
+        } ?: return null
+        val file = version.files.firstOrNull() ?: return null
+        return Resolved(
+            url = file.url,
+            size = file.size,
+            sha1 = file.sha1.takeIf { it.isNotBlank() },
+            targetName = fileNameOf(Prefs.resourceNaming, "Fabric API", file.fileName)
+        )
     }
 }
