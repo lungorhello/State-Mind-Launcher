@@ -4,8 +4,10 @@ internal object DownloadStyles {
 
     const val ACCENT = "#7c3aed"
     const val ACCENT_TEXT = "#6d28d9"
-    const val ACCENT_BG = "#efe6fd"
-    const val ACCENT_LINE = "#cdb6f2"
+
+    /** 选中项底色：大块的底色要柔，跟全局 [org.example.statemind.ui.Theme.ACCENT_BG] 同一档。 */
+    const val ACCENT_BG = "#f7f3fe"
+    const val ACCENT_LINE = "#ded3f6"
     const val CARD_BG = "#ffffff"
     const val CARD_LINE = "#d9d9de"
     const val CARD_DIVIDER = "#ececf0"
@@ -65,12 +67,16 @@ internal object DownloadStyles {
     /**
      * 跟内置弹窗、设置页的输入框同一套皮。
      *
-     * 高度写死 32：AtlantaFX 给 ComboBox 的默认内边距很大，光靠 padding 压不住，
+     * 高度写死：AtlantaFX 给 ComboBox 的默认内边距很大，光靠 padding 压不住，
      * 一行筛选框会跟旁边的按钮差出一截，显示成「半截空盒子里塞了行字」。
+     *
+     * 36 而不是 32 —— ComboBox 的文字画在内部的 list-cell 里，那层自带上下各 0.5em
+     * 的内边距；32 高减去边框只剩 30，字的高度正好卡在边界上，下缘会被削掉一像素
+     * （「Fabric」的尾巴看着少了一点点）。多给 4px 才有余量。
      */
     const val FIELD =
         "-fx-background-radius: 8; -fx-border-radius: 8; -fx-border-color: $ACCENT_LINE;" +
                 "-fx-background-color: $CARD_BG; -fx-border-width: 1; -fx-font-size: 13px;" +
-                "-fx-pref-height: 32; -fx-min-height: 32; -fx-max-height: 32;" +
+                "-fx-pref-height: 36; -fx-min-height: 36; -fx-max-height: 36;" +
                 "-fx-padding: 0 10 0 10;"
 }
