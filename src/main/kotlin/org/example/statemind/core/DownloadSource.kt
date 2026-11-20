@@ -39,7 +39,13 @@ object BmclapiSource : DownloadSource {
         "https://piston-data.mojang.com" to BASE,
         // Fabric 的 meta 在国内常常连不上（连接超时，不是 4xx），镜像这一条是它能用的前提。
         // Quilt 的 meta 没有镜像，翻不出来就照原样试。
-        "https://meta.fabricmc.net" to "$BASE/fabric-meta"
+        "https://meta.fabricmc.net" to "$BASE/fabric-meta",
+        // Forge / NeoForge 的库与安装器走同一个 maven 代理；不映射的话，知乎式的连接超时
+        // 会让「装到一半缺一个库」变成常态。
+        "https://maven.minecraftforge.net" to "$BASE/maven",
+        "https://files.minecraftforge.net/maven" to "$BASE/maven",
+        "https://maven.neoforged.net/releases" to "$BASE/maven",
+        "https://maven.neoforged.net" to "$BASE/maven"
     )
 
     private const val BASE = "https://bmclapi2.bangbang93.com"
