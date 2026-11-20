@@ -18,6 +18,17 @@ object JavaStore {
 
     val javas: List<JavaInfo> get() = list
 
+    /**
+     * 给后台线程用的一份快照。
+     *
+     * 安装器（Forge 的 processor / OptiFine 的补丁器）跑在下载线程上，不能去读只在界面线程
+     * 改的 [list]；那边要 java.exe，就从这个不可变副本里挑。
+     */
+    @Volatile
+    private var snapshot: List<JavaInfo> = emptyList()
+
+    val all: List<JavaInfo> get() = snapshot
+
     /** 区分「还没扫」与「扫了但一个都没有」。 */
     var scanned: Boolean = false
         private set
@@ -64,6 +75,7 @@ object JavaStore {
         Thread {
             val found = runCatching { BackendUtil.getJavas() }.getOrDefault(emptyList())
             val anyInstance = runCatching { hasAnyInstance() }.getOrDefault(false)
+            snapshot = found
             Platform.runLater {
                 list.clear()
                 list.addAll(found)
