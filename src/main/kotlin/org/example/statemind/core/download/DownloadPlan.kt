@@ -6,7 +6,6 @@ import java.util.zip.ZipFile
 import org.example.statemind.core.FileSource
 import org.example.statemind.core.HttpText
 import org.example.statemind.core.MiniJson
-import org.example.statemind.core.Prefs
 import org.example.statemind.core.VersionEntry
 import org.example.statemind.core.VersionJson
 import org.example.statemind.core.auth.Http
