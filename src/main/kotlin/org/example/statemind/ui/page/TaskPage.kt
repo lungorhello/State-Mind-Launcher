@@ -313,6 +313,11 @@ private class AssetRow(private val entry: InstallLog.Entry) : VBox(6.0) {
         maxWidth = Double.MAX_VALUE
         prefHeight = 6.0
     }
+    private val percent = Label().apply {
+        style = Typo.NOTE
+        minWidth = 40.0
+        alignment = Pos.CENTER_RIGHT
+    }
     private val detail = Label().apply {
         style = Typo.NOTE
         isWrapText = true
@@ -327,13 +332,17 @@ private class AssetRow(private val entry: InstallLog.Entry) : VBox(6.0) {
             state
         ).apply { alignment = Pos.CENTER_LEFT }
 
-        children.setAll(head, bar, detail)
+        val barRow = HBox(8.0, bar, percent).apply { alignment = Pos.CENTER_LEFT }
+        HBox.setHgrow(bar, Priority.ALWAYS)
+
+        children.setAll(head, barRow, detail)
         padding = Insets(12.0)
         style = CARD_STYLE
     }
 
     fun update() {
         bar.progress = entry.progress
+        percent.text = "${(entry.progress * 100).toInt()}%"
         state.text = when (entry.state) {
             InstallLog.State.RUNNING -> "正在安装"
             InstallLog.State.DONE -> "已完成"
