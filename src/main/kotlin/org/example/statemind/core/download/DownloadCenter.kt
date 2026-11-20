@@ -5,6 +5,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import org.example.statemind.core.FailureText
 import org.example.statemind.core.FileSource
 import org.example.statemind.core.VersionEntry
 import org.example.statemind.core.loader.LoaderChoice
@@ -47,6 +48,10 @@ class DownloadJob internal constructor(val id: Long, val versionId: String) {
         @Volatile
         var finished: Boolean = false
 
+        /** 这一段失败的原因，一句人话（空串 = 没失败）。 */
+        @Volatile
+        var error: String = ""
+
         val progress: Double
             get() = when {
                 finished -> 1.0
@@ -70,6 +75,10 @@ class DownloadJob internal constructor(val id: Long, val versionId: String) {
 
     /** 失败原因或收尾说明，成功时是空串。 */
     @Volatile var message: String = ""
+        internal set
+
+    /** 失败时最主要的那一条原因（人话），详情弹窗里的第一行。 */
+    @Volatile var mainReason: String = ""
         internal set
 
     @Volatile var doneBytes: Long = 0L
@@ -204,7 +213,8 @@ object DownloadCenter {
                     }
                         .onFailure { error ->
                             request.job.state = DownloadJob.State.FAILED
-                            request.job.message = error.message ?: error.toString()
+                            request.job.mainReason = FailureText.of(error).text
+                            request.job.message = "安装过程中出现问题"
                             request.job.note = "已中断"
                             notifyChanged()
                         }
