@@ -99,6 +99,28 @@ object InstanceScan {
         return out.sortedWith(BY_NEWEST)
     }
 
+    /**
+     * 同目录里有哪些版本的 json 写着 `inheritsFrom: <id>`。
+     *
+     * 删版本前必须先问一次：被继承的那份是原版材料（json + client.jar），删掉之后所有子版本都起不来，
+     * 而界面上完全看不出它们之间有关系。只认 json 里写死的那条 —— 文件夹名和 mcVersion 都是猜的，
+     * 拿来拦删除会拦错。
+     */
+    fun dependentsOf(versionDir: File, id: String): List<String> {
+        val versions = versionDir.parentFile ?: return emptyList()
+        val dirs = versions.listFiles { f -> f.isDirectory } ?: return emptyList()
+        val out = ArrayList<String>()
+        for (dir in dirs) {
+            if (dir.name == id) continue
+            val json = File(dir, "${dir.name}.json")
+            if (!json.isFile) continue
+            val root = runCatching { MiniJson.parse(json.readText(Charsets.UTF_8)) as? Map<*, *> }
+                .getOrNull()
+            if ((root?.get("inheritsFrom") as? String) == id) out.add(dir.name)
+        }
+        return out.sorted()
+    }
+
     /** json 读不动返回 [Loader.UNKNOWN]；一个加载器坐标都没有就是原版。 */
     private fun loaderOf(root: Map<*, *>?): Loader {
         val libs = (root?.get("libraries") as? List<*>)
