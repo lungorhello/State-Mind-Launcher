@@ -16,23 +16,27 @@ import org.example.statemind.core.LaunchSelection
  */
 object InstallTargets {
 
+    /**
+     * 模组 / 光影 / 资源包该放进哪一份游戏目录。
+     *
+     * 启动时默认开版本隔离（见 `LaunchUtil`），游戏读的是 `versions/<版本>/mods`；
+     * 放回 `.minecraft/mods` 的话文件下得再对也不会被加载。所以优先用首页选中
+     * 那个版本的隔离目录，目录不存在（别的启动器装的、没建过）才退回版本根。
+     */
     fun gameDir(): File {
-        LaunchSelection.current?.versionRoot?.let { if (it.isDirectory) return it }
+        LaunchSelection.current?.let { target ->
+            val isolated = File(target.versionRoot, "versions/${target.versionId}")
+            if (isolated.isDirectory) return isolated
+            if (target.versionRoot.isDirectory) return target.versionRoot
+        }
         return BackendUtil.minecraftDir
     }
 
-    /** 存档列表，最近动过的在前 —— 装数据包时默认选中的那个。 */
-    fun worlds(gameDir: File): List<File> {
-        val dirs = File(gameDir, "saves").listFiles { f -> f.isDirectory } ?: return emptyList()
-        return dirs.sortedByDescending { it.lastModified() }
-    }
-
     /**
-     * 某一类内容的落点。数据包没有「全局」位置，必须挂在某个存档的 `datapacks/` 下，
-     * 所以 [world] 对它是必需的。
+     * 某一类内容的落点。
+     *
+     * 数据包也一样落在游戏目录的 `datapacks/` 下 —— 跟 PCL 等启动器一致，
+     * 不再让人先选存档。要让某个存档用上，把文件拖进它的 `datapacks/` 即可。
      */
-    fun dirFor(kind: ModKind, gameDir: File, world: String?): File = when (kind) {
-        ModKind.DATAPACK -> File(File(File(gameDir, "saves"), world.orEmpty()), kind.dir)
-        else -> File(gameDir, kind.dir)
-    }
+    fun dirFor(kind: ModKind, gameDir: File): File = File(gameDir, kind.dir)
 }
