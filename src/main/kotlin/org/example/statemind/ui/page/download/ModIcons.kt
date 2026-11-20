@@ -139,7 +139,11 @@ internal object ModIcons {
         fitHeight = size
         isPreserveRatio = true
         isSmooth = true
-        // 方图裁成圆角，跟卡片其它圆角一致
-        clip = Rectangle(size, size).apply { arcWidth = 18.0; arcHeight = 18.0 }
+        // 方图裁成圆角，跟卡片其它圆角一致。圆角跟着尺寸走，换尺寸不会变成钝角。
+        clip = Rectangle(size, size).apply {
+            val r = size * 0.41
+            arcWidth = r
+            arcHeight = r
+        }
     }
 }
