@@ -35,11 +35,20 @@ object VersionJson {
             if (guard++ > 8) throw IllegalStateException("版本继承层数过多：$id")
             val f = File(versionRoot, "versions/$cur/$cur.json")
             require(f.isFile) { "找不到版本文件：${f.absolutePath}" }
+            val m = MiniJson.parse(f.readText()) as? Map<*, *>
+                ?: throw IllegalStateException("版本文件格式不对：${f.absolutePath}")
             if (clientJar == null) {
                 File(versionRoot, "versions/$cur/$cur.jar").takeIf { it.isFile }?.let { clientJar = it }
             }
-            val m = MiniJson.parse(f.readText()) as? Map<*, *>
-                ?: throw IllegalStateException("版本文件格式不对：${f.absolutePath}")
+            // 改了名的版本把客户端本体留在原版目录里，json 里用 `jar` 指回去
+            // （官方的 OptiFine / Forge 版本也是这么写的）
+            if (clientJar == null) {
+                val jarName = (m["jar"] as? String)?.takeIf { it.isNotBlank() && it != cur }
+                if (jarName != null) {
+                    File(versionRoot, "versions/$jarName/$jarName.jar").takeIf { it.isFile }
+                        ?.let { clientJar = it }
+                }
+            }
             chain.add(m)
             val parent = m["inheritsFrom"] as? String ?: break
             if (parent == cur || parents.contains(parent)) break
