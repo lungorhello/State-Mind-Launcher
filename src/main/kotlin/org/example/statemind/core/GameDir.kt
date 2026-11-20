@@ -35,6 +35,34 @@ object GameDir {
         "assets", "assets/indexes", "assets/objects", "assets/virtual"
     )
 
+    /**
+     * 版本装出来长什么样。
+     *
+     * - [SHARED]：原版只留一份（json + 客户端 jar），加载器版本只放一个靠 `inheritsFrom` 回指的薄壳。
+     * - [SELF_CONTAINED]：每个版本目录都是完整的（全量 json + 自己的 jar），单独拷走也能跑。
+     */
+    enum class InstallShape { SHARED, SELF_CONTAINED }
+
+    /**
+     * 内置目录和 multi 系共享原版 —— 那里只有我们在读写，省下每个版本一份 41 MB。
+     * 其余传统目录装成自包含：PCL、备份工具、手动拷走的版本，全都按「一个文件夹 = 一个版本」理解它。
+     *
+     * 内置目录自己的布局也是 [Type.OFFICIAL]，所以必须先按路径认它，再按类型认 multi 系。
+     */
+    fun installShapeOf(root: File): InstallShape {
+        if (GameDirStore.isBuiltin(root.absolutePath)) return InstallShape.SHARED
+        if (analyze(root).type == Type.MULTIMC) return InstallShape.SHARED
+        return InstallShape.SELF_CONTAINED
+    }
+
+    /**
+     * 把已经装好的版本从 [InstallShape.SHARED] 改成 [InstallShape.SELF_CONTAINED]。
+     *
+     * 现在不实现：要重写 json、复制或硬链 41 MB 的客户端 jar，Forge 那种安装器产物还没验过。
+     * 留这个入口是为了将来内置目录也换形态时，能从这里接进来，而不是散在下载链路里各改一处。
+     */
+    fun migrateShape(gameDir: File, versionId: String): Boolean = false
+
     /** root 可以是游戏目录本身、multi 系根目录，或某个 multi 系实例目录。 */
     fun analyze(root: File): Analysis {
         val files = root.listFiles()
