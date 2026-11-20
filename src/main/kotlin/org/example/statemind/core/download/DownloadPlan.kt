@@ -211,10 +211,12 @@ object DownloadPlanner {
             ?: throw IOException("版本文件不是 JSON 对象")
         add(File(vanillaDir, "${entry.id}.json"), entry.url, entry.size, entry.sha1, versionFiles)
 
-        // 原版改了名：新目录里补一份 json，`jar` 指回原版那份 —— 客户端本体不必再下一遍
+        // 原版改了名：新目录里补一份 json，`jar` 指回原版那份 —— 客户端本体不必再下一遍。
+        // id 也要跟着改成新名字：PCL 认 id 与目录名一致，对不上就判成错误版本。
         if (renamed && loader == null) {
             versionDir.mkdirs()
-            File(versionDir, "$targetId.json").writeText(withJar(versionText, entry.id), Charsets.UTF_8)
+            File(versionDir, "$targetId.json")
+                .writeText(withId(withJar(versionText, entry.id), targetId), Charsets.UTF_8)
         }
 
         // ① 客户端本体
