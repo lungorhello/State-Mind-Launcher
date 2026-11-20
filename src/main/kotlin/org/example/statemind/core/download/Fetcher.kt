@@ -95,6 +95,36 @@ internal object Fetcher {
         }
     }
 
+    /**
+     * 本地已有的文件还能不能用。
+     *
+     * 只比大小是不够的：同名同尺寸但内容坏掉的文件（下载中断留下的、别的启动器下错的）
+     * 会被当成「已经下好了」，装上去才发现用不了。
+     * 有校验和时按校验和判断 —— 对不上就是坏的，交给上层重下。
+     */
+    fun usable(item: DownloadItem): Boolean {
+        val file = item.target
+        if (!file.isFile) return false
+        if (item.size > 0L && file.length() != item.size) return false
+        val sha1 = item.sha1 ?: return item.size > 0L
+        return verify(file, sha1)
+    }
+
+    /** 文件的 SHA-1 是不是 [sha1]。读不动 / 读一半失败都算「不可用」。 */
+    fun verify(file: File, sha1: String): Boolean =
+        runCatching {
+            val digest = MessageDigest.getInstance("SHA-1")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(BUF)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            hex(digest.digest()).equals(sha1, ignoreCase = true)
+        }.getOrDefault(false)
+
     private fun hex(bytes: ByteArray): String =
         bytes.joinToString("") { "%02x".format(it) }
 }
