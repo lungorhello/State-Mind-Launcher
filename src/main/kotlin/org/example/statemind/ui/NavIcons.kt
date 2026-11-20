@@ -159,6 +159,25 @@ internal object NavIcons {
         strokeWidth = 2.0
     )
 
+    /**
+     * pin（图钉）：描边型，实例页「设为默认下载位置」用它。
+     * 这个图形离开上下文不算自明，按钮上必须带 Tooltip。
+     */
+    private val PIN = Data(
+        "M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12" +
+                "a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z",
+        5.0, 2.0, 14.0, 20.0,
+        strokeWidth = 2.0
+    )
+
+    /** folder（文件夹）：描边型，实例页「打开文件夹」用它。 */
+    private val FOLDER = Data(
+        "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9" +
+                "A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
+        2.0, 3.0, 20.0, 17.0,
+        strokeWidth = 2.0
+    )
+
     /** 返回箭头，[size] 是见方边长。 */
     fun back(size: Double, color: Color): Icon = render(BACK, size, color)
 
@@ -179,6 +198,12 @@ internal object NavIcons {
 
     /** 人形，[size] 是见方边长。 */
     fun person(size: Double, color: Color): Icon = render(PERSON, size, color)
+
+    /** 图钉，[size] 是见方边长。 */
+    fun pin(size: Double, color: Color): Icon = render(PIN, size, color)
+
+    /** 文件夹，[size] 是见方边长。 */
+    fun folder(size: Double, color: Color): Icon = render(FOLDER, size, color)
 
     /** 下载量用的箭头（跟标题栏那个下载入口同一条路径）。 */
     fun download(size: Double, color: Color): Icon = render(TASK, size, color)
