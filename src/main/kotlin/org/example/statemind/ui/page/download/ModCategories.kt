@@ -57,6 +57,17 @@ internal object ModCategories {
 
     fun zh(slug: String): String = ZH[slug] ?: slug
 
+    /**
+     * 这个分类是不是「功能分类」。
+     *
+     * Modrinth 的分类维度是混的：`optimization`（性能优化）是功能分类，
+     * `fabric` / `neoforge` 是加载器，`project_type:mod` 是项目类型 ——
+     * 后两种不是功能分类，不该当标签挂出去。
+     *
+     * 判据就是「有没有收录进译文表」：收录的都是功能分类。
+     */
+    fun isFunction(slug: String): Boolean = ZH.containsKey(slug)
+
     /** 卡片上那一行分类，最多 [limit] 个。 */
     fun text(slugs: List<String>, limit: Int = 2): String =
         slugs.take(limit).joinToString(" ") { zh(it) }
