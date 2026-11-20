@@ -90,6 +90,18 @@ object Prefs {
             save()
         }
 
+    /**
+     * 「实例」页上钉住的那份游戏目录：新版本的 json 与客户端落在这里。
+     * 空串表示没钉过，用内置的 `StateMind\.minecraft`。
+     * 存路径而不是序号 —— 用户自加的目录会被移除，序号会错位。
+     */
+    var downloadDir: String
+        get() = props.getProperty(KEY_DOWNLOAD_DIR).orEmpty()
+        set(value) {
+            props.setProperty(KEY_DOWNLOAD_DIR, value)
+            save()
+        }
+
     /** 这个启动器实例的随机标识，生成一次长期复用：同一份 clientToken 发出去的令牌才能 refresh。 */
     val yggdrasilClientToken: String
         get() {
@@ -132,6 +144,7 @@ object Prefs {
     private const val KEY_RESOURCE_TARGET = "download.resourceTarget"
     private const val KEY_RESOURCE_DIR = "download.resourceDir"
     private const val KEY_RESOURCE_NAMING = "download.resourceNaming"
+    private const val KEY_DOWNLOAD_DIR = "download.dir"
 
     /** 「无限制」时的实际线程上限：再高只会把磁盘和网络排队排死。 */
     const val THREADS_MAX = 64
