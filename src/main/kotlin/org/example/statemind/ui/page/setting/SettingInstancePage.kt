@@ -9,18 +9,18 @@ import javafx.scene.control.ComboBox
 import javafx.scene.control.Label
 import javafx.scene.control.ScrollPane
 import javafx.scene.control.TextField
-import javafx.scene.input.Clipboard
-import javafx.scene.input.ClipboardContent
 import javafx.scene.layout.HBox
 import javafx.scene.layout.Priority
 import javafx.scene.layout.Region
 import javafx.scene.layout.StackPane
 import javafx.scene.layout.VBox
+import javafx.scene.paint.Color
 import javafx.stage.DirectoryChooser
 import javafx.stage.Window
 import org.example.statemind.core.GameDir
 import org.example.statemind.core.GameDirStore
 import org.example.statemind.core.InstanceScan
+import org.example.statemind.core.RecycleBin
 import org.example.statemind.ui.Dialogs
 import org.example.statemind.ui.Page
 import java.io.File
@@ -408,41 +408,20 @@ class SettingInstancePage : Page {
     // ---------- 删除版本 ----------
 
     /**
-     * 删一个版本 = 删 `versions/<id>` 整个文件夹。不可恢复，所以要用户把版本名打一遍 ——
-     * 这一屏点错一下就是几个 G 的库和配置没了。名字长的给个复制按钮，别逼着人对着屏幕敲。
+     * 删一个版本 = 把 `versions/<id>` 整个移到回收站。
+     *
+     * 不再要求把版本名打一遍。删除本身可还原，再让人对着屏幕抄一串加载器版本号，
+     * 只会让「点了没反应」成为最常见的结局 —— 名字对不上时按钮是灰的，连报错都没有。
      */
     private fun askDeleteVersion(v: InstanceScan.Version) {
-        val field = TextField().apply {
-            promptText = v.id
-            maxWidth = CONTENT_WIDTH
-            style = FIELD_STYLE
-        }
-        val copy = Button("复制").apply {
-            style = BTN_GHOST
-            setOnAction {
-                Clipboard.getSystemClipboard().setContent(
-                    ClipboardContent().apply { putString(v.id) }
-                )
-                field.requestFocus()
-            }
-        }
-        val input = HBox(8.0, field, copy).apply { alignment = Pos.CENTER_LEFT }
-
         Dialogs.confirm(
             title = "删除版本",
-            body = "将删除 versions/${v.id} 整个文件夹，无法恢复。\n输入版本名以确认。",
+            body = "将把 versions/${v.id} 整个文件夹移到回收站，可以从回收站还原。",
             kind = Dialogs.Kind.ERROR,
-            confirmText = "删除",
-            extra = input,
-            contentHeight = 200.0,
-            confirmDisabledWhen = Bindings.createBooleanBinding(
-                Callable { field.text.trim() != v.id },
-                field.textProperty()
-            )
+            confirmText = "删除"
         ) {
-            val deleted = runCatching { v.dir.deleteRecursively() }.getOrDefault(false)
-            if (!deleted && v.dir.exists()) {
-                Dialogs.error("删除失败", "有文件正在被占用。关掉游戏或资源管理器后重试。")
+            if (!RecycleBin.moveToTrash(v.dir)) {
+                Dialogs.error("删除失败", "文件正在被占用，或系统不允许移到回收站。关掉游戏后重试。")
             }
             refresh()
         }
@@ -514,13 +493,16 @@ class SettingInstancePage : Page {
 
         /** 版本卡片：淡紫底 + 淡紫描边（跟「设置 · 玩家」里非当前账号那行同色）。 */
         const val CARD_STYLE =
-            "-fx-background-color: #faf7ff; -fx-border-color: #cdb6f2; -fx-border-width: 1;" +
+            "-fx-background-color: #faf7ff; -fx-border-color: #ded3f6; -fx-border-width: 1;" +
                     "-fx-border-radius: 8; -fx-background-radius: 8;"
 
         /** 弹窗表单里的输入框：跟内置弹窗同一套皮。 */
         const val FIELD_STYLE =
-            "-fx-background-radius: 8; -fx-border-radius: 8; -fx-border-color: #cdb6f2;" +
+            "-fx-background-radius: 8; -fx-border-radius: 8; -fx-border-color: #ded3f6;" +
                     "-fx-background-color: #ffffff; -fx-border-width: 1; -fx-font-size: 13px;" +
                     "-fx-padding: 8 10 8 10;"
+
+        /** 弹窗正文与提示行共用的字色。 */
+        const val PROMPT_TEXT = "#3f3f46"
     }
 }
