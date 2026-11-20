@@ -150,6 +150,15 @@ internal object NavIcons {
         strokeWidth = 2.0
     )
 
+    /**
+     * person（人）：描边型，元信息里的「作者」用它。
+     */
+    private val PERSON = Data(
+        "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+        4.0, 3.0, 16.0, 18.0,
+        strokeWidth = 2.0
+    )
+
     /** 返回箭头，[size] 是见方边长。 */
     fun back(size: Double, color: Color): Icon = render(BACK, size, color)
 
@@ -167,6 +176,9 @@ internal object NavIcons {
 
     /** 箱子，[size] 是见方边长。 */
     fun packageIcon(size: Double, color: Color): Icon = render(PACKAGE, size, color)
+
+    /** 人形，[size] 是见方边长。 */
+    fun person(size: Double, color: Color): Icon = render(PERSON, size, color)
 
     /** 下载量用的箭头（跟标题栏那个下载入口同一条路径）。 */
     fun download(size: Double, color: Color): Icon = render(TASK, size, color)
