@@ -7,7 +7,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicReference
+import org.example.statemind.core.FailureText
 import org.example.statemind.core.FileSource
 import org.example.statemind.core.GameDir
 import org.example.statemind.core.InstallMarker
@@ -100,7 +100,6 @@ internal object DownloadRunner {
         val installRun = board.stage(DownloadStages.INSTALL_GAME, emptyList(), DownloadOrders.INSTALL_GAME)
 
         val failed = AtomicInteger(0)
-        val firstError = AtomicReference<String?>(null)
         val limiter = RateLimiter(Prefs.downloadSpeedKbps.toLong() * 1024L)
         val threads = if (Prefs.downloadThreads == 0) Prefs.THREADS_MAX else Prefs.downloadThreads
         board.skipped += plan.skipped
@@ -114,7 +113,7 @@ internal object DownloadRunner {
             downloadWave(
                 board, job,
                 vanillaRuns + listOfNotNull(installerRun) + loaderRuns + extraRuns,
-                limiter, threads, failed, firstError
+                limiter, threads, failed
             )
 
             // ② 加载器的库清单藏在安装器里：主文件到位之后才解析得出它要哪些库
@@ -136,7 +135,7 @@ internal object DownloadRunner {
                     } ?: board.stage(stage.title, stage.files, DownloadOrders.LOADER_LIBS)
                     run.hasSteps = stage.steps.isNotEmpty()
                     run.adopt(stage.files)
-                    downloadWave(board, job, listOf(run), limiter, threads, failed, firstError)
+                    downloadWave(board, job, listOf(run), limiter, threads, failed)
                     if (failed.get() > 0 || job.isCancelled()) break
                     runSteps(job, run, stage.steps)
                 }
@@ -158,7 +157,10 @@ internal object DownloadRunner {
         } catch (e: Exception) {
             job.state = DownloadJob.State.FAILED
             job.note = "安装失败"
-            job.message = e.message ?: e.toString()
+            board.noteFailure(FailureText.of(e))
+            board.markUnfinishedFailed(FailureText.of(e).text)
+            job.mainReason = board.mainReason()
+            job.message = "安装过程中出现问题"
         } finally {
             publishing.set(false)
             runCatching { ticker.join(1000) }
@@ -175,7 +177,9 @@ internal object DownloadRunner {
                 failed.get() > 0 -> {
                     job.state = DownloadJob.State.FAILED
                     job.note = "下载未完成"
-                    job.message = "${failed.get()} 个文件下载失败（例如 ${firstError.get()}）"
+                    board.markUnfinishedFailed(board.mainReason())
+                    job.mainReason = board.mainReason()
+                    job.message = "${failed.get()} 个文件下载失败"
                 }
 
                 else -> {
@@ -231,8 +235,7 @@ internal object DownloadRunner {
         runs: List<Board.Run>,
         limiter: RateLimiter,
         threads: Int,
-        failed: AtomicInteger,
-        firstError: AtomicReference<String?>
+        failed: AtomicInteger
     ) {
         val pending = ArrayList<Pair<Board.Run, DownloadItem>>()
         for (run in runs) {
@@ -274,8 +277,9 @@ internal object DownloadRunner {
                             break
                         } catch (e: Exception) {
                             failed.incrementAndGet()
-                            firstError.compareAndSet(null, "${item.target.name}：${e.message ?: e}")
-                            run.failed()
+                            val reason = FailureText.of(e)
+                            board.noteFailure(reason)
+                            run.failed(reason.text)
                         }
                     }
                 } finally {
@@ -433,9 +437,10 @@ internal class Board(private val job: DownloadJob) {
             count.incrementAndGet()
         }
 
-        fun failed() {
+        fun failed(reason: String) {
             count.incrementAndGet()
             state.status = "失败"
+            state.error = reason
         }
 
         fun finishIfDone() {
@@ -458,6 +463,33 @@ internal class Board(private val job: DownloadJob) {
 
     /** 没有下载地址、只能跳过的库。 */
     val skipped = ArrayList<String>()
+
+    /** 失败原因按粗分类计数：弹窗里只报最主要的那一条。 */
+    private val reasonCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    private val reasonText = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** 记一次失败，并把它的粗分类计入统计。 */
+    fun noteFailure(reason: FailureText.Reason) {
+        reasonCounts.merge(reason.category, 1, Int::plus)
+        reasonText[reason.category] = reason.text
+    }
+
+    /** 出现最多的那一类失败的人话描述；没有失败就是空串。 */
+    fun mainReason(): String {
+        val top = reasonCounts.entries.maxByOrNull { it.value }?.key ?: return ""
+        return reasonText[top] ?: ""
+    }
+
+    /** 异常中断时，把没收尾的段标成失败，让用户看到卡在哪一段。 */
+    fun markUnfinishedFailed(reason: String) {
+        for (run in runs) {
+            if (run.state.status != "失败" && run.state.status != "等待中" && !run.state.finished) {
+                run.state.status = "失败"
+                run.state.error = reason
+            }
+        }
+    }
 
     val doneBytes = AtomicLong(0L)
     val totalBytes = AtomicLong(0L)
