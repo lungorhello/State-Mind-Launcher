@@ -82,6 +82,9 @@ internal class VersionInstallView(
     /** Fabric API 那一块：跟版本下拉同宽同左边界，挂在选中那张卡片的展开区里。 */
     private val apiRow = VBox(6.0)
 
+    /** API 清单还在查时的那句话。 */
+    private val apiNote = Label("正在读取 Fabric API…").apply { style = Typo.NOTE }
+
     /** 这个游戏版本下查到的加载器版本表；null = 还没查过。 */
     private val versions = HashMap<LoaderKind, List<LoaderVersion>>()
 
@@ -99,6 +102,12 @@ internal class VersionInstallView(
 
     private var apiReady = false
     private var apiMc: String? = null
+
+    /** Fabric API 列表正在查。查完之前选了 Fabric / Quilt 也不能开始下载。 */
+    private var apiLoading = false
+
+    /** 查过但没查到（网络失败 / 这个版本没有配套的 API）。此时不该卡住下载。 */
+    private var apiFailed = false
 
     /** 每次换加载器 +1：晚回来的旧结果丢掉。 */
     private var generation = 0
@@ -208,6 +217,8 @@ internal class VersionInstallView(
         nameEdited = false
         apiReady = false
         apiMc = null
+        apiLoading = false
+        apiFailed = false
         apiGeneration++
         apiCombo.items.clear()
         apiCombo.value = null
@@ -218,6 +229,10 @@ internal class VersionInstallView(
         // 别让人点进去才发现「没有可用版本」。答案进了 LoaderSource 的缓存。
         availabilityGen++
         checkLoaders(entry.id, availabilityGen)
+
+        // Fabric API 的清单跟加载器清单互不相干，先查起来：
+        // 等用户点完加载器再查，白白多等一轮网络。
+        loadApi(entry.id)
     }
 
     fun setSource(label: String) {
@@ -309,9 +324,20 @@ internal class VersionInstallView(
                 }
             }
         }
-        apiRow.children.setAll(small("Fabric API"), apiCombo)
+        apiRow.children.setAll(small("Fabric API"), apiCombo, apiNote)
         // 跟上面那个下拉之间多留一点，两块才看得出是分开的
         apiRow.padding = Insets(6.0, 0.0, 0.0, 0.0)
+    }
+
+    /** 读 API 清单时占一行字，读完就撤。 */
+    private fun syncApiNote() {
+        val show = apiLoading || apiFailed
+        apiNote.isVisible = show
+        apiNote.isManaged = show
+        apiNote.text = if (apiFailed) "没读到 Fabric API 清单，这次下载不带它" else "正在读取 Fabric API…"
+        // 没读到时下拉是空的，留着只会让人以为点不动
+        apiCombo.isVisible = apiReady
+        apiCombo.isManaged = apiReady
     }
 
     /** 展开区里的小标题。宽度由展开区统一给，它不占列宽，两个下拉因此左边界一样。 */
@@ -362,6 +388,7 @@ internal class VersionInstallView(
             row.state.style = Typo.NOTE + "-fx-text-fill: $stateFill;"
         }
         syncExpansion()
+        syncApiNote()
         syncName()
         validate()
     }
@@ -377,7 +404,10 @@ internal class VersionInstallView(
      * 一个节点只能有一个父节点，所以先让别的卡片撒手，再挂上去。
      */
     private fun syncExpansion() {
-        val showApi = apiReady && (selected == LoaderKind.FABRIC || selected == LoaderKind.QUILT)
+        // 选了 Fabric / Quilt 就要挂出 API 那一块：查的过程中也挂着，
+        // 用户看得见「正在读」而不是这块凭空消失。
+        val showApi = (selected == LoaderKind.FABRIC || selected == LoaderKind.QUILT) &&
+            (apiReady || apiLoading || apiFailed)
         val host = if (showApi) selected?.let { rows[it] }?.expand else null
 
         for ((kind, row) in rows) {
@@ -416,8 +446,11 @@ internal class VersionInstallView(
         // 还没选游戏版本时这一页是藏着的，不必报「版本名为空」
         val problem = if (current == null) null else nameProblem()
         nameHint.text = problem.orEmpty()
+        // 选了 Fabric / Quilt 就要顺带装 API：清单还没查完就先别让用户点开始，
+        // 免得下到一半才发现少了个前置。
+        val apiPending = apiLoading && (selected == LoaderKind.FABRIC || selected == LoaderKind.QUILT)
         startButton.isDisable =
-            current == null || problem != null || (selected != null && choice == null)
+            current == null || problem != null || (selected != null && choice == null) || apiPending
     }
 
     /**
@@ -557,22 +590,27 @@ internal class VersionInstallView(
 
     /** 按游戏版本查一次 API 列表，默认选最新那个。同一个版本查过就不再问。 */
     private fun loadApi(mc: String) {
-        if (apiMc == mc && apiCombo.items.isNotEmpty()) return
+        if (apiMc == mc && (apiCombo.items.isNotEmpty() || apiLoading || apiFailed)) return
         apiGeneration++
         val mine = apiGeneration
         apiMc = mc
         apiReady = false
+        apiLoading = true
+        apiFailed = false
         apiCombo.items.clear()
         apiCombo.value = null
         refreshUi()
 
         Thread {
-            val list = runCatching { FabricApi.versionsFor(mc) }.getOrDefault(emptyList())
+            val outcome = runCatching { FabricApi.versionsFor(mc) }
             Platform.runLater {
                 if (mine != apiGeneration) return@runLater
+                val list = outcome.getOrDefault(emptyList())
                 apiCombo.items.setAll(list)
                 apiCombo.value = list.firstOrNull()
                 apiReady = list.isNotEmpty()
+                apiFailed = apiReady.not()
+                apiLoading = false
                 refreshUi()
             }
         }.apply { isDaemon = true; name = "fabric-api-versions" }.start()
