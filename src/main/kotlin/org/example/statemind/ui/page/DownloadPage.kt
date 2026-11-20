@@ -8,7 +8,7 @@ import javafx.scene.control.Label
 import javafx.scene.layout.Priority
 import javafx.scene.layout.StackPane
 import javafx.scene.layout.VBox
-import org.example.statemind.core.BackendUtil
+import org.example.statemind.core.GameDirStore
 import org.example.statemind.core.InstanceScan
 import org.example.statemind.core.LaunchSelection
 import org.example.statemind.core.Prefs
@@ -34,10 +34,14 @@ class DownloadPage(private val onOpenTasks: () -> Unit = {}) : Page {
     override val title = "下载"
 
     /**
-     * 版本装进哪份游戏目录：首页当前选中的那份，没选就退到内置的 `.minecraft`。
+     * 版本装进哪份游戏目录：实例页钉住的「默认下载位置」，没钉过就是内置那份 `.minecraft`。
+     * 钉住的目录被删掉时退回内置 —— 否则一次误删会让下载页彻底不可用。
      * 安装页要用它算版本名查重，装完还要按它落盘 —— 两处必须是同一个值。
      */
-    private val gameRoot: () -> File = { LaunchSelection.current?.versionRoot ?: BackendUtil.minecraftDir }
+    private val gameRoot: () -> File = {
+        val pinned = Prefs.downloadDir
+        if (pinned.isNotBlank() && File(pinned).isDirectory) File(pinned) else GameDirStore.builtin.root
+    }
 
     private val topBar = TopBar(onSelect = ::selectTab, onSearch = ::search)
     private val hero = VersionHero { entry -> openInstall(entry) }
