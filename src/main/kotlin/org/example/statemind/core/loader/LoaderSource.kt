@@ -1,18 +1,20 @@
 package org.example.statemind.core.loader
 
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import org.example.statemind.core.GameDir
 import org.example.statemind.core.HttpText
 import org.example.statemind.core.MiniJson
 import org.example.statemind.core.Prefs
 import org.example.statemind.core.auth.Http
 
 /**
- * 加载器版本从各自的 meta 服务取：Fabric 与 Quilt 都提供「一份现成的 profile json」，
- * 里面只有加载器自己的库和 mainClass，其余靠 `inheritsFrom` 挂在原版版本上。
+ * 加载器版本从各自的服务取。Fabric 与 Quilt 提供「一份现成的 profile json」，
+ * 里面只有加载器自己的库和 mainClass，其余靠 `inheritsFrom` 挂在原版版本上 ——
+ * 这两个把 json 落到 `versions/<id>/`、再把库下下来就能启动。
  *
- * 所以这两个不需要跑安装器 —— 把 json 落到 `versions/<id>/`、再把库下下来就能启动。
- * Forge / NeoForge 没有这种 profile（要打补丁），走不了这条路，暂不接。
+ * Forge / NeoForge / OptiFine / LiteLoader 各有各的清单与安装方式，分派出去。
  */
 object LoaderSource {
 
@@ -24,18 +26,48 @@ object LoaderSource {
      */
     private val cache = ConcurrentHashMap<String, List<LoaderVersion>>()
 
+    /**
+     * 上一次的清单落一份在磁盘上，隔几个小时再用。
+     *
+     * 安装页一进去就要问六个加载器；全都重来一遍，在网络不好的时候比选版本本身还慢。
+     * 空结果不落盘 —— 新构建发布后得能被发现。
+     */
+    private val diskDir: File by lazy { File(GameDir.appRoot(), "cache/loaders") }
+
+    private const val DISK_TTL = 6 * 60 * 60 * 1000L
+
     fun cached(kind: LoaderKind, mcVersion: String): List<LoaderVersion>? = cache[keyOf(kind, mcVersion)]
 
     fun versions(kind: LoaderKind, mcVersion: String): List<LoaderVersion> {
         cache[keyOf(kind, mcVersion)]?.let { return it }
+        diskGet(kind, mcVersion)?.let {
+            cache[keyOf(kind, mcVersion)] = it
+            return it
+        }
+
+        val list = fetch(kind, mcVersion)
+        cache[keyOf(kind, mcVersion)] = list
+        if (list.isNotEmpty()) diskPut(kind, mcVersion, list)
+        return list
+    }
+
+    private fun fetch(kind: LoaderKind, mcVersion: String): List<LoaderVersion> = when (kind) {
+        LoaderKind.FABRIC -> fabricQuilt(kind, mcVersion)
+        LoaderKind.QUILT -> fabricQuilt(kind, mcVersion)
+        LoaderKind.FORGE, LoaderKind.NEOFORGE -> ForgeSource.versions(kind, mcVersion)
+        LoaderKind.OPTIFINE -> OptiFineSource.versions(mcVersion)
+        LoaderKind.LITELOADER -> LiteLoaderSource.versions(mcVersion)
+        LoaderKind.VANILLA -> emptyList()
+    }
+
+    /** Fabric / Quilt 的 meta 返回 `[{loader: {version, stable}}]`。 */
+    private fun fabricQuilt(kind: LoaderKind, mcVersion: String): List<LoaderVersion> {
         val url = when (kind) {
             LoaderKind.FABRIC -> "https://meta.fabricmc.net/v2/versions/loader/$mcVersion"
-            LoaderKind.QUILT -> "https://meta.quiltmc.org/v3/versions/loader/$mcVersion"
-            else -> throw IOException("${kind.label} 暂不支持")
+            else -> "https://meta.quiltmc.org/v3/versions/loader/$mcVersion"
         }
-        val body = fetch(url)
-        val list = MiniJson.parse(body) as? List<*> ?: return emptyList()
-        val parsed = list.mapNotNull { item ->
+        val parsed = MiniJson.parse(fetchText(url)) as? List<*> ?: return emptyList()
+        val list = parsed.mapNotNull { item ->
             val loader = (item as? Map<*, *>)?.get("loader") as? Map<*, *>
                 ?: return@mapNotNull null
             val version = (loader["version"] as? String)?.takeIf { it.isNotBlank() }
@@ -45,35 +77,44 @@ object LoaderSource {
 
         // 两家都按「新的在前」返回，但 Quilt 把 beta 排在正式版前面 —— 直接取第一个会选中 beta。
         // 稳定 > 普通 > 预发布；同一档里保持服务端给的顺序（sortedBy 是稳定排序）。
-        val result = parsed.sortedByDescending {
+        return list.sortedByDescending {
             when {
                 it.stable -> 2
                 it.preRelease -> 0
                 else -> 1
             }
         }
-        cache[keyOf(kind, mcVersion)] = result
-        return result
     }
 
     private fun keyOf(kind: LoaderKind, mcVersion: String): String = "${kind.name}@$mcVersion"
 
+    /** 安装时去哪儿拿「版本长什么样」：Fabric 系是一份 json，其余是安装包 / 自己拼。 */
     fun profileUrl(kind: LoaderKind, mcVersion: String, loaderVersion: String): String = when (kind) {
         LoaderKind.FABRIC ->
             "https://meta.fabricmc.net/v2/versions/loader/$mcVersion/$loaderVersion/profile/json"
         LoaderKind.QUILT ->
             "https://meta.quiltmc.org/v3/versions/loader/$mcVersion/$loaderVersion/profile/json"
-        else -> throw IOException("${kind.label} 暂不支持")
+        LoaderKind.FORGE, LoaderKind.NEOFORGE ->
+            ForgeSource.installerUrls(kind, mcVersion, loaderVersion).firstOrNull().orEmpty()
+        LoaderKind.OPTIFINE -> OptiFineSource.downloadUrl(mcVersion, loaderVersion)
+        // 这两家的 json 由各自的 Source 自己拼，这里只占位
+        LoaderKind.LITELOADER -> ""
+        LoaderKind.VANILLA -> ""
     }
 
     /**
-     * 版本 id 同时是 `versions/` 下的文件夹名。两家 profile json 里写的 id 都是这个形状
-     * （`fabric-loader-<加载器版本>-<游戏版本>`），先按同一规则算出来，界面不必等联网。
+     * 版本 id 同时是 `versions/` 下的文件夹名。Fabric 系 json 里写的 id 就是这个形状；
+     * 其余按官方安装器 / PCL 的叫法拼，界面不必等联网。
      */
     fun idOf(kind: LoaderKind, mcVersion: String, loaderVersion: String): String = when (kind) {
         LoaderKind.FABRIC -> "fabric-loader-$loaderVersion-$mcVersion"
         LoaderKind.QUILT -> "quilt-loader-$loaderVersion-$mcVersion"
-        else -> "${kind.label.lowercase()}-$loaderVersion-$mcVersion"
+        LoaderKind.FORGE -> "$mcVersion-forge-$loaderVersion"
+        LoaderKind.NEOFORGE -> "$mcVersion-neoforge-$loaderVersion"
+        LoaderKind.OPTIFINE -> "${mcVersion}-OptiFine_$loaderVersion"
+        // 跟 PCL 的叫法一致：1.12.2-LiteLoader1.12.2
+        LoaderKind.LITELOADER -> "$mcVersion-LiteLoader$loaderVersion"
+        LoaderKind.VANILLA -> mcVersion
     }
 
     fun choice(kind: LoaderKind, mcVersion: String, loaderVersion: String): LoaderChoice =
@@ -85,11 +126,40 @@ object LoaderSource {
             profileUrl = profileUrl(kind, mcVersion, loaderVersion)
         )
 
+    // ---------- 磁盘缓存 ----------
+
+    private fun diskFile(kind: LoaderKind, mcVersion: String): File =
+        File(diskDir, "${kind.name}-${mcVersion.replace(Regex("[^A-Za-z0-9._-]"), "_")}.json")
+
+    private fun diskGet(kind: LoaderKind, mcVersion: String): List<LoaderVersion>? = runCatching {
+        val file = diskFile(kind, mcVersion)
+        if (!file.isFile) return null
+        if (System.currentTimeMillis() - file.lastModified() > DISK_TTL) return null
+        val list = (MiniJson.parse(file.readText(Charsets.UTF_8)) as? List<*>)
+            ?.mapNotNull { item ->
+                val map = item as? Map<*, *> ?: return@mapNotNull null
+                val id = (map["id"] as? String)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                LoaderVersion(id, map["stable"] == true)
+            }
+            ?: return null
+        list.ifEmpty { null }
+    }.getOrNull()
+
+    private fun diskPut(kind: LoaderKind, mcVersion: String, list: List<LoaderVersion>) {
+        runCatching {
+            diskDir.mkdirs()
+            val text = MiniJson.write(list.map { mapOf("id" to it.id, "stable" to it.stable) })
+            diskFile(kind, mcVersion).writeText(text, Charsets.UTF_8)
+        }
+    }
+
+    // ---------- 取文本 ----------
+
     /**
-     * 按设置里的下载源依次试。官方 meta 在国内经常是**连接超时**（不是 4xx），
+     * 按设置里的下载源依次试。官方地址在国内经常是**连接超时**（不是 4xx），
      * 所以第一条给短超时，连不上就赶紧换镜像，别让人盯着「读取…」等满 20 秒。
      */
-    private fun fetch(url: String): String {
+    internal fun fetchText(url: String): String {
         val candidates = Prefs.fileSource.order(url)
         var last: Exception? = null
         candidates.forEachIndexed { index, candidate ->
@@ -129,7 +199,7 @@ data class LoaderChoice(
     val loaderVersion: String,
     /** 版本 id / `versions/` 下的文件夹名。 */
     val id: String,
-    /** profile json 的地址，装的时候原样落盘。 */
+    /** 概况地址：Fabric 系是 profile json，其余是安装包。 */
     val profileUrl: String
 ) {
     /** 任务页上那一行标题。 */
