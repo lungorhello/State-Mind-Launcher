@@ -80,6 +80,7 @@ object Modrinth {
         query: String,
         gameVersion: String?,
         loader: String?,
+        category: String?,
         sort: Sort,
         offset: Int,
         limit: Int = 20
@@ -88,7 +89,7 @@ object Modrinth {
         val index = if (query.isBlank() && sort == Sort.RELEVANCE) Sort.DOWNLOADS.index else sort.index
         val url = StringBuilder("$BASE/search?limit=$limit&offset=$offset&index=$index")
         if (query.isNotBlank()) url.append("&query=").append(encode(query))
-        facetsOf(kind, gameVersion, loader)?.let { url.append("&facets=").append(encode(it)) }
+        facetsOf(kind, gameVersion, loader, category)?.let { url.append("&facets=").append(encode(it)) }
 
         val root = getJson(url.toString()) as? Map<*, *> ?: throw IOException("搜索结果格式不对")
         val hits = (root["hits"] as? List<*>).orEmpty().mapNotNull { raw ->
@@ -132,43 +133,57 @@ object Modrinth {
         val list = getJson("$BASE/project/$projectId/version") as? List<*>
             ?: throw IOException("文件列表格式不对")
         return list.mapNotNull { raw ->
-            val map = raw as? Map<*, *> ?: return@mapNotNull null
-            val files = (map["files"] as? List<*>).orEmpty()
-                .filterIsInstance<Map<*, *>>()
-                .let { all -> listOfNotNull(all.firstOrNull { it["primary"] == true } ?: all.firstOrNull()) }
-                .mapNotNull { file ->
-                    val link = file["url"] as? String ?: return@mapNotNull null
-                    val name = file["filename"] as? String ?: return@mapNotNull null
-                    File(
-                        projectId = projectId,
-                        versionName = map["version_number"] as? String ?: map["name"] as? String ?: name,
-                        fileName = name,
-                        url = link,
-                        size = (file["size"] as? Number)?.toLong() ?: 0L,
-                        sha1 = (file["hashes"] as? Map<*, *>)?.get("sha1") as? String ?: "",
-                        gameVersions = strings(map["game_versions"]),
-                        loaders = strings(map["loaders"])
-                    )
-                }
-            if (files.isEmpty()) return@mapNotNull null
-            Version(
-                id = map["id"] as? String ?: return@mapNotNull null,
-                name = map["name"] as? String ?: "",
-                number = map["version_number"] as? String ?: "",
-                published = (map["date_published"] as? String).orEmpty().substringBefore('T'),
-                downloads = (map["downloads"] as? Number)?.toLong() ?: 0L,
-                gameVersions = strings(map["game_versions"]),
-                loaders = strings(map["loaders"]),
-                files = files
-            )
+            parseVersion(raw as? Map<*, *> ?: return@mapNotNull null, projectId)
         }
     }
 
-    private fun facetsOf(kind: ModKind, gameVersion: String?, loader: String?): String? {
+    /**
+     * 单个发布版本。安装页已经选好了版本 id，就不必再把整个项目的版本列表拉一遍 ——
+     * `fabric-api` 的版本列表有几百条，一次几百 KB，只为了一个 id 不划算。
+     */
+    fun version(versionId: String): Version? {
+        val map = getJson("$BASE/version/$versionId") as? Map<*, *> ?: return null
+        return parseVersion(map, "")
+    }
+
+    private fun parseVersion(map: Map<*, *>, projectId: String): Version? {
+        val files = (map["files"] as? List<*>).orEmpty()
+            .filterIsInstance<Map<*, *>>()
+            .let { all -> listOfNotNull(all.firstOrNull { it["primary"] == true } ?: all.firstOrNull()) }
+            .mapNotNull { file ->
+                val link = file["url"] as? String ?: return@mapNotNull null
+                val name = file["filename"] as? String ?: return@mapNotNull null
+                File(
+                    projectId = projectId,
+                    versionName = map["version_number"] as? String ?: map["name"] as? String ?: name,
+                    fileName = name,
+                    url = link,
+                    size = (file["size"] as? Number)?.toLong() ?: 0L,
+                    sha1 = (file["hashes"] as? Map<*, *>)?.get("sha1") as? String ?: "",
+                    gameVersions = strings(map["game_versions"]),
+                    loaders = strings(map["loaders"])
+                )
+            }
+        if (files.isEmpty()) return null
+        return Version(
+            id = map["id"] as? String ?: return null,
+            name = map["name"] as? String ?: "",
+            number = map["version_number"] as? String ?: "",
+            published = (map["date_published"] as? String).orEmpty().substringBefore('T'),
+            downloads = (map["downloads"] as? Number)?.toLong() ?: 0L,
+            gameVersions = strings(map["game_versions"]),
+            loaders = strings(map["loaders"]),
+            files = files
+        )
+    }
+
+    private fun facetsOf(kind: ModKind, gameVersion: String?, loader: String?, category: String?): String? {
         val groups = ArrayList<List<String>>()
         groups += listOf("project_type:${kind.projectType}")
         if (!gameVersion.isNullOrBlank()) groups += listOf("versions:$gameVersion")
         if (kind.filterByLoader && !loader.isNullOrBlank()) groups += listOf("categories:$loader")
+        // 分类跟加载器同属 categories 维度，但分开成两组就是「且」—— 选了 Fabric 又要优化，两个都要满足
+        if (!category.isNullOrBlank()) groups += listOf("categories:$category")
         return groups.joinToString(",", "[", "]") { group ->
             group.joinToString(",", "[", "]") { "\"$it\"" }
         }
