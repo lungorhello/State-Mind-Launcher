@@ -11,6 +11,7 @@ import javafx.scene.Group
 import javafx.scene.control.Button
 import javafx.scene.control.ContentDisplay
 import javafx.scene.control.Label
+import javafx.scene.control.OverrunStyle
 import javafx.scene.control.ProgressIndicator
 import javafx.scene.control.ScrollPane
 import javafx.scene.control.Tooltip
@@ -77,6 +78,15 @@ internal class ModDetailView(
     /** 点「也有数据包版本」时要切到哪一类。 */
     private var switchKind: ModKind? = null
 
+    /** 项目详情里的更新时间（`2026-11-12` 这种）；搜索结果不给，得单独问一次。 */
+    private var projectUpdated: String? = null
+
+    /** 项目支持哪些加载器。同上，来自项目详情。 */
+    private var projectLoaders: List<String> = emptyList()
+
+    /** 项目支持哪些游戏版本。同上，来自项目详情。 */
+    private var projectGameVersions: List<String> = emptyList()
+
     /** 提示条被关掉 / 已经点过切换 —— 同一次打开里不再冒出来。 */
     private var switchDismissed = false
 
@@ -131,14 +141,40 @@ internal class ModDetailView(
         style = "-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: ${DownloadStyles.TEXT};"
         // 一行放不下就省略，不折到第二行 —— 折下去会把简介挤走
         isWrapText = false
-        maxWidth = Double.MAX_VALUE
+        textOverrun = OverrunStyle.ELLIPSIS
+        maxWidth = 420.0
+        minWidth = 0.0
     }
-    private val meta = Label().apply { style = Typo.NOTE }
+    /** 作者名。PCL 那行没有，但这是项目归属，丢了就得回去列表页找。 */
+    private val authorLabel = Label().apply { style = Typo.NOTE }
+
+    /**
+     * 简介。**只占一行**，放不下就省略号 —— PCL 就是这样，
+     * 折成两行会把下面那排元信息顶下去，页面反而变长。
+     *
+     * [maxWidth] 必须是有限值：Label 只有在宽度真的不够时才画省略号，
+     * 给成「无限宽」的话它会按文字全宽要空间，永远不会截断。
+     * [minWidth] 给 0：默认的最小宽度是文字全宽，不放开的话它会反过来把标题挤出卡片。
+     */
     private val desc = Label().apply {
         style = Typo.DIM
-        isWrapText = true
-        maxWidth = Double.MAX_VALUE
+        isWrapText = false
+        textOverrun = OverrunStyle.ELLIPSIS
+        maxWidth = 620.0
+        minWidth = 0.0
     }
+
+    /** 分类小标签（PCL 在简介前面挂的那一串）。 */
+    private val catTag = Label().apply {
+        style = "-fx-font-size: 12px; -fx-text-fill: ${DownloadStyles.ACCENT_TEXT};" +
+                "-fx-background-color: ${DownloadStyles.ACCENT_BG};" +
+                "-fx-background-radius: 4; -fx-padding: 1 6 1 6;"
+        isVisible = false
+        isManaged = false
+    }
+
+    /** 那一排元信息：支持版本 / 下载量 / 最近更新 / 平台，每项前面一个小图标。 */
+    private val metaRow = HBox(14.0)
 
     private val openButton = Button("转到 Modrinth").apply {
         style = BTN_GHOST
@@ -163,16 +199,16 @@ internal class ModDetailView(
      * 挤在图标和文字之间又别扭。这里把整块内容往右挪一点，留出一条窄槽放它。
      */
     private val crossButton: Button = Button().apply {
-        val icon = NavIcons.cross(14.0, Color.web(DownloadStyles.TEXT_DIM))
+        val icon = NavIcons.cross(10.0, Color.web(DownloadStyles.TEXT_DIM))
         graphic = icon.node
         contentDisplay = ContentDisplay.GRAPHIC_ONLY
         tooltip = Tooltip("返回")
-        prefWidth = 24.0
-        prefHeight = 24.0
-        minWidth = 24.0
-        minHeight = 24.0
-        maxWidth = 24.0
-        maxHeight = 24.0
+        prefWidth = 16.0
+        prefHeight = 16.0
+        minWidth = 16.0
+        minHeight = 16.0
+        maxWidth = 16.0
+        maxHeight = 16.0
         style = ICON_BTN
         setOnMouseEntered {
             style = ICON_BTN_HOVER
@@ -244,9 +280,22 @@ internal class ModDetailView(
             padding = Insets(2.0, 0.0, 0.0, 0.0)
         }
 
-        // 图标 + 标题 + 描述 + 元信息：挤成一列，像 PCL 那样整块压在左上角。
-        // 顺序照 PCL：标题 → 描述 → 提示信息（作者 / 下载量）。
-        val info = VBox(4.0, title, desc, meta).apply { minWidth = 0.0 }
+        // 标题一行：标题 + 作者。PCL 只有标题，作者跟在后面，不另起一行。
+        val titleLine = HBox(8.0, title, authorLabel).apply {
+            alignment = Pos.CENTER_LEFT
+            minWidth = 0.0
+        }
+        title.minWidth = 0.0
+        title.textOverrun = OverrunStyle.ELLIPSIS
+        // 简介一行：分类小标签 + 简介（放不下省略号）。
+        val descLine = HBox(8.0, catTag, desc).apply {
+            alignment = Pos.CENTER_LEFT
+            minWidth = 0.0
+        }
+        HBox.setHgrow(desc, Priority.ALWAYS)
+
+        // 图标 + 三行字：标题 / 简介 / 元信息。挤成一列，像 PCL 那样整块压在左上角。
+        val info = VBox(4.0, titleLine, descLine, metaRow).apply { minWidth = 0.0 }
         HBox.setHgrow(info, Priority.ALWAYS)
 
         val identity = HBox(12.0, iconBox, info).apply {
@@ -255,15 +304,15 @@ internal class ModDetailView(
         }
         HBox.setHgrow(identity, Priority.ALWAYS)
 
-        val headerCard = HBox(8.0, slot, identity).apply {
+        // 按钮排在卡片内部（PCL 就是跟在信息下面一排）。
+        val actionRow = HBox(8.0, backButton, openButton, copyButton).apply {
+            alignment = Pos.CENTER_LEFT
+        }
+
+        val headerCard = VBox(12.0, HBox(4.0, slot, identity), actionRow).apply {
             alignment = Pos.TOP_LEFT
             padding = Insets(14.0)
             style = DownloadStyles.CARD
-        }
-
-        // 按钮另起一行排在下面：PCL 就是这么摆的（转到 Modrinth / 复制名称）。
-        val actionRow = HBox(8.0, backButton, openButton, copyButton).apply {
-            alignment = Pos.CENTER_LEFT
         }
 
         val filterCard = VBox(8.0, chipsBox).apply {
@@ -273,7 +322,7 @@ internal class ModDetailView(
 
         scroll.apply {
             contentProperty().set(
-                VBox(12.0, headerCard, actionRow, filterCard, switchBar, note, rows)
+                VBox(12.0, headerCard, filterCard, switchBar, note, rows)
             )
             isFitToWidth = true
             hbarPolicy = ScrollPane.ScrollBarPolicy.NEVER
@@ -307,12 +356,11 @@ internal class ModDetailView(
         zhName = builtin.takeIf { it != hit.title }
         applyTitle()
         if (zhName == null) lookupZh(hit, mine)
-        meta.text = buildList {
-            hit.author.takeIf { it.isNotBlank() }?.let(::add)
-            add(downloadsText(hit.downloads))
-        }.joinToString(" · ")
+        authorLabel.text = hit.author
         desc.text = hit.description
         iconBox.children.setAll(ModIcons.view(hit.iconUrl, 44.0))
+        paintCategory(hit)
+        paintMeta(hit)
 
         versions = emptyList()
         rows.children.clear()
@@ -322,6 +370,22 @@ internal class ModDetailView(
         paintSwitchBar()
         skeletonChips()
         setBusy(true)
+
+        // 搜索结果里没有加载器和更新时间，单独问一次项目详情。
+        // 问不到也不碍事 —— 元信息那排少了这两项照样看。
+        projectUpdated = null
+        projectLoaders = emptyList()
+        projectGameVersions = emptyList()
+        Thread {
+            val detail = runCatching { Modrinth.project(hit.id) }.getOrNull()
+            Platform.runLater {
+                if (mine != generation || detail == null) return@runLater
+                projectUpdated = detail.updated
+                projectLoaders = detail.loaders
+                projectGameVersions = detail.gameVersions
+                paintMeta(hit)
+            }
+        }.apply { isDaemon = true; name = "modrinth-project" }.start()
 
         // 列表页已经提前取过，多数时候这里是现成的，点进来不用等
         val ready = ModCache.versions(hit.id)
@@ -714,6 +778,101 @@ internal class ModDetailView(
 
     // ---------- 渲染工具 ----------
 
+    /**
+     * 分类小标签。
+     *
+     * Modrinth 的分类里混着加载器名（fabric / neoforge）和项目类型，
+     * 这些不是分类 —— 只留真正的功能分类（性能优化、装饰…）。
+     */
+    private fun paintCategory(hit: Modrinth.Hit) {
+        val tag = hit.categories.firstOrNull { ModCategories.isFunction(it) }
+        catTag.text = tag?.let { ModCategories.zh(it) }.orEmpty()
+        catTag.isVisible = tag != null
+        catTag.isManaged = tag != null
+    }
+
+    /**
+     * 元信息那一排：支持版本 / 下载量 / 最近更新 / 平台。
+     *
+     * 跟 PCL 一样一排摆开，每项前面一个小图标。
+     * 加载器和更新日期要项目详情才给全（搜索结果里没有），所以先摆已有的，
+     * 详情回来再补 —— 补的过程界面上不闪。
+     */
+    private fun paintMeta(hit: Modrinth.Hit) {
+        val items = ArrayList<javafx.scene.Node>()
+
+        val support = supportText(hit)
+        if (support.isNotBlank()) {
+            items += metaItem(
+                NavIcons.packageIcon(13.0, Color.web(DownloadStyles.TEXT_DIM)),
+                support
+            )
+        }
+        items += metaItem(
+            NavIcons.download(13.0, Color.web(DownloadStyles.TEXT_DIM)),
+            downloadsText(hit.downloads)
+        )
+        projectUpdated?.let {
+            items += metaItem(
+                NavIcons.clock(13.0, Color.web(DownloadStyles.TEXT_DIM)),
+                relativeDate(it)
+            )
+        }
+        items += metaItem(
+            NavIcons.globe(13.0, Color.web(DownloadStyles.TEXT_DIM)),
+            "Modrinth"
+        )
+
+        metaRow.children.setAll(*items.toTypedArray())
+    }
+
+    /**
+     * 「支持版本」那一项：加载器 + 最低游戏版本，跟 PCL 的写法一致。
+     *
+     * PCL 写「Fabric / NeoForge 1.16+」—— 加载器全列出来，后面跟一个
+     * 「最低支持的正式版 +」，表示往上都支持。
+     */
+    private fun supportText(hit: Modrinth.Hit): String {
+        val loaders = if (projectLoaders.isNotEmpty()) projectLoaders else hit.categories.filter { it in LOADER_SLUGS }
+        val loaderText = ModLoaders.labelsOf(loaders)
+        val allVersions = if (projectGameVersions.isNotEmpty()) projectGameVersions else hit.gameVersions
+        val releases = allVersions.filter { RELEASE_ID.matches(it) }
+            .sortedWith { a, b -> McVersion.compare(a, b) }
+        val min = releases.firstOrNull()
+        return when {
+            loaderText.isBlank() && min == null -> ""
+            min == null -> loaderText
+            loaderText.isBlank() -> "$min+"
+            else -> "$loaderText $min+"
+        }
+    }
+
+    /** 元信息里的一项：一个小图标 + 一行字。 */
+    private fun metaItem(icon: NavIcons.Icon, text: String): HBox = HBox(
+        5.0,
+        icon.node,
+        Label(text).apply { style = Typo.NOTE }
+    ).apply {
+        alignment = Pos.CENTER_LEFT
+    }
+
+    /**
+     * 「8 天前」这种写法。
+     *
+     * Modrinth 的 updated 只给到日期，比不出来具体多久 —— 说「8 天前」是按天算的。
+     * 超过一年就直接写日期，写「一年前」没意思。
+     */
+    private fun relativeDate(date: String): String {
+        val parsed = runCatching { java.time.LocalDate.parse(date) }.getOrNull() ?: return date
+        val days = java.time.Duration.between(parsed, java.time.LocalDate.now()).toDays()
+        return when {
+            days <= 0L -> "今天更新"
+            days < 30L -> "$days 天前更新"
+            days < 365L -> "${days / 30} 个月前更新"
+            else -> date
+        }
+    }
+
     private fun downloadsText(count: Long): String = when {
         count >= 100_000_000 -> "%.1f 亿次下载".format(count / 100_000_000.0)
         count >= 10_000 -> "%.1f 万次下载".format(count / 10_000.0)
@@ -752,6 +911,9 @@ internal class ModDetailView(
         /** 同一批游戏版本下，加载器的先后。 */
         private val LOADER_ORDER = listOf("Fabric", "Quilt", "Forge", "NeoForge")
 
+        /** Modrinth 分类维度里的加载器值 —— 这些是加载器名，不是功能分类。 */
+        private val LOADER_SLUGS = setOf("fabric", "quilt", "forge", "neoforge")
+
         /** Modrinth 的 `loaders` 值按内容形态分组，用来把同一个项目里的模组文件与数据包文件分开。 */
         private val MOD_LOADERS = setOf("fabric", "quilt", "forge", "neoforge")
         private val DATAPACK_LOADERS = setOf("datapack")
@@ -784,7 +946,7 @@ internal class ModDetailView(
         const val BTN_GHOST =
             "-fx-background-color: #ffffff; -fx-border-color: #d4d4d8; -fx-border-width: 1;" +
                     "-fx-border-radius: 8; -fx-background-radius: 8;" +
-                    "-fx-text-fill: #52525b; -fx-font-size: 13px; -fx-padding: 6 14 6 14;" +
+                    "-fx-text-fill: #52525b; -fx-font-size: 14px; -fx-padding: 9 18 9 18;" +
                     "-fx-cursor: hand;"
 
         /** 版本系列按钮。选中的用强调色，未选中的跟普通按钮一个样子。 */
