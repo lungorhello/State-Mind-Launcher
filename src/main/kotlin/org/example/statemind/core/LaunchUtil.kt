@@ -118,6 +118,10 @@ object LaunchUtil {
             "game_directory" to gameDir.absolutePath,
             "assets_root" to File(sharedRoot, "assets").absolutePath,
             "assets_index_name" to assetsIndex,
+            // Forge / NeoForge 的 jvm 参数用这两个拼模块路径（`-p` / `-DlibraryDirectory`），
+            // 少一个就会把 `${library_directory}` 原样传给 JVM 然后起不来
+            "library_directory" to libDir.absolutePath,
+            "classpath_separator" to File.pathSeparator,
             // 官方模板里 UUID 不带横线；第三方用皮肤站给的角色 UUID，离线按名字算
             "auth_uuid" to (cfg.uuid?.replace("-", "") ?: offlineUuid(cfg.playerName)),
             "auth_access_token" to cfg.accessToken,
