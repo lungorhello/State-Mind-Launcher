@@ -84,6 +84,16 @@ internal object NavIcons {
         strokeWidth = 2.0
     )
 
+    /** back（lucide `arrow-left`）：描边型，跟标题栏那套线条图标同源。 */
+    private val BACK = Data(
+        "M19 12H5M12 19L5 12L12 5",
+        0.0, 0.0, 24.0, 24.0,
+        strokeWidth = 2.0
+    )
+
+    /** 返回箭头，[size] 是见方边长。 */
+    fun back(size: Double, color: Color): Icon = render(BACK, size, color)
+
     /** 返回 null 表示这个页面没配图标（按钮退化成纯文字）。 */
     fun byPage(pageId: String, size: Double, color: Color): Icon? {
         val data = when (pageId) {
@@ -94,7 +104,10 @@ internal object NavIcons {
             "task" -> TASK
             else -> return null
         }
+        return render(data, size, color)
+    }
 
+    private fun render(data: Data, size: Double, color: Color): Icon {
         val strokeWidth = data.strokeWidth
         val path = SVGPath().apply {
             content = data.d
