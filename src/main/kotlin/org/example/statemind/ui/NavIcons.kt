@@ -122,6 +122,34 @@ internal object NavIcons {
         25.2, 21.1, 42.2, 49.4
     )
 
+    /**
+     * clock（时钟）：描边型，元信息里的「最近更新」用它。
+     */
+    private val CLOCK = Data(
+        "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2",
+        3.0, 3.0, 18.0, 18.0,
+        strokeWidth = 2.0
+    )
+
+    /**
+     * globe（地球）：描边型，元信息里的「平台」用它。
+     */
+    private val GLOBE = Data(
+        "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.7 3.8 5.8 3.8 9s-1.3 6.3-3.8 9" +
+                "c-2.5-2.7-3.8-5.8-3.8-9S9.5 5.7 12 3z",
+        3.0, 3.0, 18.0, 18.0,
+        strokeWidth = 2.0
+    )
+
+    /**
+     * package（箱子）：描边型，元信息里的「支持版本 / 加载器」用它。
+     */
+    private val PACKAGE = Data(
+        "M12 2l9 5v10l-9 5-9-5V7zM3 7l9 5 9-5M12 12v10",
+        3.0, 2.0, 18.0, 20.0,
+        strokeWidth = 2.0
+    )
+
     /** 返回箭头，[size] 是见方边长。 */
     fun back(size: Double, color: Color): Icon = render(BACK, size, color)
 
@@ -130,6 +158,18 @@ internal object NavIcons {
 
     /** 垃圾桶，[size] 是见方边长。 */
     fun trash(size: Double, color: Color): Icon = render(TRASH, size, color)
+
+    /** 时钟，[size] 是见方边长。 */
+    fun clock(size: Double, color: Color): Icon = render(CLOCK, size, color)
+
+    /** 地球，[size] 是见方边长。 */
+    fun globe(size: Double, color: Color): Icon = render(GLOBE, size, color)
+
+    /** 箱子，[size] 是见方边长。 */
+    fun packageIcon(size: Double, color: Color): Icon = render(PACKAGE, size, color)
+
+    /** 下载量用的箭头（跟标题栏那个下载入口同一条路径）。 */
+    fun download(size: Double, color: Color): Icon = render(TASK, size, color)
 
     /** 返回 null 表示这个页面没配图标（按钮退化成纯文字）。 */
     fun byPage(pageId: String, size: Double, color: Color): Icon? {
