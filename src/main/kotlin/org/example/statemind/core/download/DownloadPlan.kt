@@ -463,7 +463,10 @@ object DownloadPlanner {
                     fetchText(loader.profileUrl, source)
                 }
                 versionDir.mkdirs()
-                File(versionDir, "$targetId.json").writeText(profileText, Charsets.UTF_8)
+                // 目录名就是版本 id：官方 profile json 里的 id 写的是 `fabric-loader-0.20.1-26.3`，
+                // 跟用户改过的名字（`26.3-Fabric 0.20.1`）对不上。PCL 认 id 与目录名一致，
+                // 对不上就把这个版本判成错误版本，还会自己补一个出来 —— 同一份游戏目录里两个版本。
+                File(versionDir, "$targetId.json").writeText(withId(profileText, targetId), Charsets.UTF_8)
                 val profile = MiniJson.parse(profileText) as? Map<*, *>
                     ?: throw IOException("加载器配置不是 JSON 对象")
                 val loaderLibs = (profile["libraries"] as? List<*>)
@@ -580,6 +583,30 @@ object DownloadPlanner {
         if (brace < 0) return text
         val safe = jar.replace("\\", "\\\\").replace("\"", "\\\"")
         return text.substring(0, brace + 1) + "\"jar\": \"$safe\"," + text.substring(brace + 1)
+    }
+
+    /**
+     * 把加载器 profile json 里的 `id` 换成这次装出来的版本名。
+     *
+     * 官方 profile json 的 id 是 `fabric-loader-0.20.1-26.3` 这种形状，跟目录名
+     * （用户改过的 `26.3-Fabric 0.20.1`）对不上。PCL 认版本目录名必须与 json 里的 id 一致，
+     * 对不上就把这个版本判成错误版本，自己另建一个能跑的 —— 同一份游戏目录里就出现两个版本。
+     *
+     * 只替换顶层那一个 id 的值，别的地方一个字符都不动（库条目里也有 name/id 之类的字段）。
+     */
+    private fun withId(text: String, id: String): String {
+        val key = "\"id\""
+        val at = text.indexOf(key)
+        if (at < 0) return text
+        val colon = text.indexOf(':', at + key.length)
+        if (colon < 0) return text
+        var i = colon + 1
+        while (i < text.length && text[i].isWhitespace()) i++
+        if (i >= text.length || text[i] != '"') return text
+        val end = text.indexOf('"', i + 1)
+        if (end < 0) return text
+        val safe = id.replace("\\", "\\\\").replace("\"", "\\\"")
+        return text.substring(0, i) + safe + text.substring(end + 1)
     }
 
     private fun number(value: Any?): Long = (value as? Number)?.toLong() ?: 0L
