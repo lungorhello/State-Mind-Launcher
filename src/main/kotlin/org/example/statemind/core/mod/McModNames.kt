@@ -31,10 +31,16 @@ object McModNames {
     /** 空串 = 查过、确实没有。这样同一个项目不会每次点开都再问一遍。 */
     private val cache = ConcurrentHashMap<String, String>()
 
+    /** 中文关键词 → 英文项目名，给搜索用。同样是空串表示查过没有。 */
+    private val enCache = ConcurrentHashMap<String, String>()
+
     private var loaded = false
+    private var enLoaded = false
 
     /** 缓存文件。放在启动器自己的目录里，跟设置同级。 */
     private fun file(): File = File(GameDir.appRoot(), "modnames.txt")
+
+    private fun enFile(): File = File(GameDir.appRoot(), "modnames-zh.txt")
 
     /**
      * 查中文名；查不到、或者结果不像同一件东西时返回 null。
@@ -58,21 +64,60 @@ object McModNames {
         return found
     }
 
-    private fun parse(html: String, title: String): String? {
-        for (match in ITEM.findAll(html)) {
-            val plain = match.groupValues[1].replace(TAG, "").trim()
-            val cut = plain.indexOf('(')
-            if (cut <= 0) continue
-            val zh = plain.substring(0, cut).trim()
-            val en = plain.substring(cut + 1).trim().trimEnd(')').trim()
-            if (!en.equals(title, ignoreCase = true)) continue
-            if (zh.isEmpty() || zh.none { it.code >= 0x2E80 }) continue
-            // 「钠 · 扩展」「钠/Embeddium：动态光源」这类不是本体
-            if (zh.any { it in "·/：:" }) continue
-            return zh
-        }
-        return null
+    /**
+     * 中文关键词对应的英文项目名。
+     *
+     * Modrinth 只认英文标题，搜「钠」永远是零结果；PCL 能搜中文是因为它自带一张
+     * 中英对照表。这里改成现查 MC 百科：它的搜索对中文很宽容，第一条基本就是本体。
+     *
+     * 优先「中文名正好是这个词」的条目，其次「以它开头」的，最后退到第一条带英文名的
+     * 结果 —— 搜「钠」时第一条就是「钠 (Sodium)」，而搜「优化」这种泛词也能落到一个
+     * 具体项目上，总比一条都不出来得好。
+     *
+     * 会联网，只能在后台线程调。
+     */
+    fun englishOf(query: String): String? {
+        val key = query.trim()
+        if (key.isEmpty() || key.none { it.code >= 0x2E80 }) return null
+        loadEn()
+
+        enCache[key]?.let { return it.ifEmpty { null } }
+
+        val encoded = URLEncoder.encode(key, StandardCharsets.UTF_8)
+        val body = runCatching {
+            Http.get(SEARCH + encoded, mapOf("User-Agent" to UA), 12L).body
+        }.getOrNull() ?: return null
+
+        val found = pickEnglish(items(body), key)
+        enCache[key] = found.orEmpty()
+        runCatching { enFile().appendText("$key\t${found.orEmpty()}\n", Charsets.UTF_8) }
+        return found
     }
+
+    private fun pickEnglish(all: List<Pair<String, String>>, query: String): String? {
+        val base = all.filter { it.second.isNotBlank() }
+        val hit = base.firstOrNull { it.first == query }
+            ?: base.firstOrNull { it.first.startsWith(query) }
+            ?: base.firstOrNull()
+        return hit?.second
+    }
+
+    /** 搜索结果里的「中文名 (英文名)」。名字带附加说明的条目不是本体，直接丢掉。 */
+    private fun items(html: String): List<Pair<String, String>> = ITEM.findAll(html).mapNotNull { match ->
+        val plain = match.groupValues[1].replace(TAG, "").trim()
+        val cut = plain.indexOf('(')
+        if (cut <= 0) return@mapNotNull null
+        val zh = plain.substring(0, cut).trim()
+        val en = plain.substring(cut + 1).trim().trimEnd(')').trim()
+        if (zh.isEmpty() || en.isEmpty()) return@mapNotNull null
+        if (zh.none { it.code >= 0x2E80 }) return@mapNotNull null
+        // 「钠 · 扩展」「钠/Embeddium：动态光源」这类不是本体
+        if (zh.any { it in "·/：:" }) return@mapNotNull null
+        zh to en
+    }.toList()
+
+    private fun parse(html: String, title: String): String? =
+        items(html).firstOrNull { it.second.equals(title, ignoreCase = true) }?.first
 
     private fun remember(title: String, zh: String?) {
         cache[title] = zh.orEmpty()
@@ -83,13 +128,23 @@ object McModNames {
     private fun load() {
         if (loaded) return
         loaded = true
-        val f = file()
+        readInto(file(), cache)
+    }
+
+    @Synchronized
+    private fun loadEn() {
+        if (enLoaded) return
+        enLoaded = true
+        readInto(enFile(), enCache)
+    }
+
+    private fun readInto(f: File, into: MutableMap<String, String>) {
         if (!f.isFile) return
         runCatching {
             f.forEachLine { line ->
                 val cut = line.indexOf('\t')
                 if (cut <= 0) return@forEachLine
-                cache[line.substring(0, cut)] = line.substring(cut + 1).trim()
+                into[line.substring(0, cut)] = line.substring(cut + 1).trim()
             }
         }
     }
