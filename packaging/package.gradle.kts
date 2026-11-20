@@ -23,13 +23,13 @@ val distAppName = "State Mind Launcher"
  * `x.y.z` 三段或 `x.y.z.b` 四段都行（实测四段 jpackage + WiX 5 接受并原样保留）。
  * 与 build.gradle.kts 里的 `version` 无关：那个只是 Gradle 内部版本，这个才是发布号。
  */
-val distAppVersion = "0.3.0.1"
+val distAppVersion = "0.3.2.13"
 
 /**
  * 给人看的版本号。可以有 `-pre1` 这类后缀 —— 它**不进 MSI**（MSI 装不下），
  * 只用在 ZIP 文件名和便携版说明里，所以预发布版也能一眼看出是哪个。
  */
-val distDisplayVersion = "0.3.0-pre2"
+val distDisplayVersion = "0.3.2.13"
 
 val distMainClass = "org.example.statemind.MainKt"
 
