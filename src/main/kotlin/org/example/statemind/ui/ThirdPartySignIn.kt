@@ -39,7 +39,7 @@ object ThirdPartySignIn {
 
     /** 皮肤站表单输入框的皮：跟内置弹窗里的输入框同一套。 */
     const val FIELD_STYLE =
-        "-fx-background-radius: 8; -fx-border-radius: 8; -fx-border-color: #cdb6f2;" +
+        "-fx-background-radius: 8; -fx-border-radius: 8; -fx-border-color: #ded3f6;" +
                 "-fx-background-color: #ffffff; -fx-border-width: 1; -fx-font-size: 13px;" +
                 "-fx-padding: 8 10 8 10;"
 
