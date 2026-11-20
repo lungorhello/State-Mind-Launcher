@@ -265,7 +265,7 @@ object Dialogs {
             "-fx-border-radius: 8; -fx-text-fill: #3f3f46;"
 
     private const val FIELD_STYLE =
-        "-fx-background-radius: 8; -fx-border-radius: 8; -fx-border-color: #cdb6f2;" +
+        "-fx-background-radius: 8; -fx-border-radius: 8; -fx-border-color: #ded3f6;" +
                 "-fx-background-color: #ffffff; -fx-border-width: 1; -fx-font-size: 13px;" +
                 "-fx-padding: 8 10 8 10;"
 }
