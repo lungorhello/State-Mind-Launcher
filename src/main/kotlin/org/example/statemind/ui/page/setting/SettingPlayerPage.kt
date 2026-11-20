@@ -10,6 +10,7 @@ import javafx.scene.layout.HBox
 import javafx.scene.layout.Priority
 import javafx.scene.layout.Region
 import javafx.scene.layout.VBox
+import javafx.scene.paint.Color
 import org.example.statemind.core.Account
 import org.example.statemind.core.AccountStore
 import org.example.statemind.core.AccountType
@@ -18,6 +19,7 @@ import org.example.statemind.core.Prefs
 import org.example.statemind.core.auth.AuthStore
 import org.example.statemind.core.auth.LoginEmail
 import org.example.statemind.ui.Dialogs
+import org.example.statemind.ui.NavIcons
 import org.example.statemind.ui.Page
 import org.example.statemind.ui.ThirdPartySignIn
 import org.example.statemind.ui.helpMark
@@ -205,18 +207,23 @@ class SettingPlayerPage : Page {
             }
         }
 
-        val deleteBtn = Button("✕").apply {
+        // 删除用垃圾桶图标：常态灰色，悬停才变红（红得跟窗体上 × 的悬停色一致）
+        val deleteIcon = NavIcons.trash(16.0, Color.web("#8b8b93"))
+        val deleteBtn = Button().apply {
+            graphic = deleteIcon.node
+            contentDisplay = ContentDisplay.GRAPHIC_ONLY
+            tooltip = Tooltip("删除账号")
             minWidth = 34.0
             prefWidth = 34.0
             minHeight = 34.0
             prefHeight = 34.0
             style = """
-                -fx-background-color: #e11d2e;
+                -fx-background-color: transparent;
                 -fx-background-radius: 6;
-                -fx-text-fill: white;
-                -fx-font-size: 14px;
-                -fx-font-weight: bold;
+                -fx-cursor: hand;
             """
+            setOnMouseEntered { deleteIcon.color = Color.web("#C05050") }
+            setOnMouseExited { deleteIcon.color = Color.web("#8b8b93") }
             setOnAction { deleteAccount(acc) }
         }
 
