@@ -4,6 +4,7 @@ import java.io.File
 import java.io.IOException
 import java.util.zip.ZipFile
 import org.example.statemind.core.FileSource
+import org.example.statemind.core.GameDir
 import org.example.statemind.core.HttpText
 import org.example.statemind.core.MiniJson
 import org.example.statemind.core.VersionEntry
@@ -129,9 +130,9 @@ object DownloadPlanner {
      * 会阻塞（要读版本 json、资源索引；加载器还要读安装器 —— 但那部分挪到下载阶段了）。
      * 落点是**版本隔离**目录：游戏本体进 `versions/<id>/`，共享的 `libraries/` 与 `assets/` 进游戏目录根。
      *
-     * [targetId] 是这次装出来的版本名（安装页上可以改）。原版的 json 与客户端 jar 仍然落在
-     * `versions/<entry.id>/` —— 加载器版本靠 `inheritsFrom` 回来找它，同一份原版也可能被
-     * 好几个加载器版本共用，不能按新名字再存一遍。
+     * [targetId] 是这次装出来的版本名（安装页上可以改）。落成几个文件夹看 [GameDir.installShapeOf]：
+     * 共享形态下原版的 json 与客户端 jar 落在 `versions/<entry.id>/`，加载器版本靠 `inheritsFrom`
+     * 回来找；自包含形态下所有文件都进 `versions/<targetId>/`，不另建原版目录。
      */
     fun plan(
         entry: VersionEntry,
@@ -145,6 +146,8 @@ object DownloadPlanner {
         val vanillaDir = File(root, "versions/${entry.id}")
         val versionDir = File(root, "versions/$targetId")
         val renamed = targetId != entry.id
+        // 内置目录与 multi 系共享原版，其余传统目录装成自包含（一个文件夹一个完整版本）
+        val selfContained = GameDir.installShapeOf(root) == GameDir.InstallShape.SELF_CONTAINED
         val libDir = File(root, "libraries")
         val assetsDir = File(root, "assets")
 
@@ -209,14 +212,25 @@ object DownloadPlanner {
         val versionText = fetchText(entry.url, source)
         val json = MiniJson.parse(versionText) as? Map<*, *>
             ?: throw IOException("版本文件不是 JSON 对象")
-        add(File(vanillaDir, "${entry.id}.json"), entry.url, entry.size, entry.sha1, versionFiles)
+        if (loader == null) {
+            if (selfContained) {
+                // 官方 json 本身就是全量，按新名字直接写进版本目录：不必再存一份原版
+                versionDir.mkdirs()
+                File(versionDir, "$targetId.json").writeText(withId(versionText, targetId), Charsets.UTF_8)
+            } else {
+                add(File(vanillaDir, "${entry.id}.json"), entry.url, entry.size, entry.sha1, versionFiles)
 
-        // 原版改了名：新目录里补一份 json，`jar` 指回原版那份 —— 客户端本体不必再下一遍。
-        // id 也要跟着改成新名字：PCL 认 id 与目录名一致，对不上就判成错误版本。
-        if (renamed && loader == null) {
-            versionDir.mkdirs()
-            File(versionDir, "$targetId.json")
-                .writeText(withId(withJar(versionText, entry.id), targetId), Charsets.UTF_8)
+                // 原版改了名：新目录里补一份 json，`jar` 指回原版那份 —— 客户端本体不必再下一遍。
+                // id 也要跟着改成新名字：PCL 认 id 与目录名一致，对不上就判成错误版本。
+                if (renamed) {
+                    versionDir.mkdirs()
+                    File(versionDir, "$targetId.json")
+                        .writeText(withId(withJar(versionText, entry.id), targetId), Charsets.UTF_8)
+                }
+            }
+        } else if (!selfContained) {
+            // 加载器版本的 json 是薄壳，父版本那份必须落地才有得继承
+            add(File(vanillaDir, "${entry.id}.json"), entry.url, entry.size, entry.sha1, versionFiles)
         }
 
         // ① 客户端本体
@@ -224,7 +238,7 @@ object DownloadPlanner {
         val client = downloads?.get("client") as? Map<*, *>
         if (client != null) {
             add(
-                File(vanillaDir, "${entry.id}.jar"),
+                if (selfContained) File(versionDir, "$targetId.jar") else File(vanillaDir, "${entry.id}.jar"),
                 client["url"] as? String,
                 number(client["size"]),
                 client["sha1"] as? String,
@@ -293,7 +307,7 @@ object DownloadPlanner {
 
         // ⑤ 加载器
         val loaderPlan = loader?.let {
-            buildLoaderPlan(it, entry, root, source, json, targetId, versionDir, libDir, onNote)
+            buildLoaderPlan(it, entry, root, source, json, targetId, versionDir, libDir, selfContained, onNote)
         }
 
         // ⑥ 跟着版本一起装的前置（Fabric API）。它下在版本自己的 mods/ 里，不进游戏根目录
@@ -338,6 +352,7 @@ object DownloadPlanner {
         targetId: String,
         versionDir: File,
         libDir: File,
+        selfContained: Boolean,
         onNote: (String) -> Unit
     ): LoaderPlan {
         val label = loader.kind.label
@@ -357,7 +372,8 @@ object DownloadPlanner {
                         vanilla = json
                     )
                     versionDir.mkdirs()
-                    File(versionDir, "$targetId.json").writeText(prepared.versionText, Charsets.UTF_8)
+                    File(versionDir, "$targetId.json")
+                        .writeText(versionJsonText(prepared.versionText, targetId, json, selfContained), Charsets.UTF_8)
 
                     val libItems = ArrayList<DownloadItem>()
                     val miss = ArrayList<String>()
@@ -415,7 +431,8 @@ object DownloadPlanner {
                         requiredJava = InstallJava.requiredMajor(json)
                     )
                     versionDir.mkdirs()
-                    File(versionDir, "$targetId.json").writeText(prepared.versionText, Charsets.UTF_8)
+                    File(versionDir, "$targetId.json")
+                        .writeText(versionJsonText(prepared.versionText, targetId, json, selfContained), Charsets.UTF_8)
 
                     val libItems = ArrayList<DownloadItem>()
                     val miss = ArrayList<String>()
@@ -468,7 +485,8 @@ object DownloadPlanner {
                 // 目录名就是版本 id：官方 profile json 里的 id 写的是 `fabric-loader-0.20.1-26.3`，
                 // 跟用户改过的名字（`26.3-Fabric 0.20.1`）对不上。PCL 认 id 与目录名一致，
                 // 对不上就把这个版本判成错误版本，还会自己补一个出来 —— 同一份游戏目录里两个版本。
-                File(versionDir, "$targetId.json").writeText(withId(profileText, targetId), Charsets.UTF_8)
+                File(versionDir, "$targetId.json")
+                    .writeText(versionJsonText(profileText, targetId, json, selfContained), Charsets.UTF_8)
                 val profile = MiniJson.parse(profileText) as? Map<*, *>
                     ?: throw IOException("加载器配置不是 JSON 对象")
                 val loaderLibs = (profile["libraries"] as? List<*>)
@@ -596,6 +614,26 @@ object DownloadPlanner {
      *
      * 只替换顶层那一个 id 的值，别的地方一个字符都不动（库条目里也有 name/id 之类的字段）。
      */
+    /**
+     * 版本 json 的最终文本。
+     *
+     * 共享形态原样落盘（只改 id）：加载器那份只写自己的库，原版材料靠 `inheritsFrom` 回父版本找。
+     * 自包含形态把父版本合并进来摊成一份全量 json —— 之后这个目录不依赖任何别的版本，
+     * 按「一个文件夹 = 一个版本」理解它的工具（PCL、备份、直接拷走）才不会判它缺文件。
+     */
+    private fun versionJsonText(
+        loaderText: String,
+        targetId: String,
+        parent: Map<*, *>,
+        selfContained: Boolean
+    ): String {
+        if (!selfContained) return withId(loaderText, targetId)
+        val child = MiniJson.parse(loaderText) as? Map<*, *> ?: return withId(loaderText, targetId)
+        val flat = LinkedHashMap<String, Any?>(VersionJson.merge(listOf(child, parent)))
+        flat["id"] = targetId
+        return MiniJson.write(flat)
+    }
+
     private fun withId(text: String, id: String): String {
         val key = "\"id\""
         val at = text.indexOf(key)
