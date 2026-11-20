@@ -6,9 +6,11 @@ import javafx.geometry.Pos
 import javafx.scene.Node
 import javafx.scene.control.Button
 import javafx.scene.control.ComboBox
+import javafx.scene.control.ContentDisplay
 import javafx.scene.control.Label
 import javafx.scene.control.ScrollPane
 import javafx.scene.control.TextField
+import javafx.scene.control.Tooltip
 import javafx.scene.layout.HBox
 import javafx.scene.layout.Priority
 import javafx.scene.layout.Region
@@ -22,6 +24,7 @@ import org.example.statemind.core.GameDirStore
 import org.example.statemind.core.InstanceScan
 import org.example.statemind.core.RecycleBin
 import org.example.statemind.ui.Dialogs
+import org.example.statemind.ui.NavIcons
 import org.example.statemind.ui.Page
 import java.io.File
 import java.util.concurrent.Callable
@@ -215,8 +218,23 @@ class SettingInstancePage : Page {
         val info = VBox(2.0, name, desc).apply { minWidth = 0.0 }
         HBox.setHgrow(info, Priority.ALWAYS)
 
-        val remove = Button("删除").apply {
-            style = BTN_GHOST_SMALL
+        // 删除用垃圾桶图标：常态灰色，悬停才变红
+        val removeIcon = NavIcons.trash(15.0, Color.web("#8b8b93"))
+        val remove = Button().apply {
+            graphic = removeIcon.node
+            contentDisplay = ContentDisplay.GRAPHIC_ONLY
+            tooltip = Tooltip("删除")
+            minWidth = 30.0
+            prefWidth = 30.0
+            minHeight = 30.0
+            prefHeight = 30.0
+            style = """
+                -fx-background-color: transparent;
+                -fx-background-radius: 6;
+                -fx-cursor: hand;
+            """
+            setOnMouseEntered { removeIcon.color = Color.web("#C05050") }
+            setOnMouseExited { removeIcon.color = Color.web("#8b8b93") }
             setOnAction { askDeleteVersion(v) }
         }
 
