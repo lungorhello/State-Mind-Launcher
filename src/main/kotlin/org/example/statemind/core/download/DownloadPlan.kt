@@ -165,7 +165,7 @@ object DownloadPlanner {
 
         /** 一条库记录拆成要下的文件；算不出地址的记进 [skipped]。 */
         fun libraryItems(lib: Map<*, *>): Pair<List<DownloadItem>, List<String>> {
-            if (!VersionJson.rulesAllow(lib["rules"])) return emptyList() to emptyList()
+            if (!VersionJson.rulesAllow(lib["rules"])) return emptyList<DownloadItem>() to emptyList<String>()
             val out = ArrayList<DownloadItem>()
             val miss = ArrayList<String>()
             val dl = lib["downloads"] as? Map<*, *>
