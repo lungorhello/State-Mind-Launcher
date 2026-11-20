@@ -16,7 +16,6 @@ import org.example.statemind.core.RecentInstall
 import org.example.statemind.core.RemoteVersion
 import org.example.statemind.core.VersionEntry
 import org.example.statemind.core.download.DownloadCenter
-import org.example.statemind.core.mod.FabricApi
 import org.example.statemind.core.mod.InstallTargets
 import org.example.statemind.core.mod.ModKind
 import org.example.statemind.ui.Page
@@ -27,20 +26,32 @@ import org.example.statemind.ui.page.download.TopBar
 import org.example.statemind.ui.page.download.VersionHero
 import org.example.statemind.ui.page.download.VersionInstallView
 import org.example.statemind.ui.page.download.VersionListView
+import java.io.File
 
 class DownloadPage(private val onOpenTasks: () -> Unit = {}) : Page {
 
     override val id = "download"
     override val title = "下载"
 
+    /**
+     * 版本装进哪份游戏目录：首页当前选中的那份，没选就退到内置的 `.minecraft`。
+     * 安装页要用它算版本名查重，装完还要按它落盘 —— 两处必须是同一个值。
+     */
+    private val gameRoot: () -> File = { LaunchSelection.current?.versionRoot ?: BackendUtil.minecraftDir }
+
     private val topBar = TopBar(onSelect = ::selectTab, onSearch = ::search)
     private val hero = VersionHero { entry -> openInstall(entry) }
     private val list = VersionListView { entry -> openInstall(entry) }
     private val install = VersionInstallView(
         onBack = { showList() },
-        onStart = { startDownload() }
+        onStart = { startDownload() },
+        root = gameRoot
     )
-    private val community = ModrinthView { InstallTargets.gameDir() }
+    private val community = ModrinthView({ InstallTargets.gameDir() }) { open ->
+        // 进详情页后，外层的类型栏与搜索框让位；回来时恢复
+        topBar.isVisible = !open
+        topBar.isManaged = !open
+    }
 
     private val unavailableTitle = Label().apply { style = Typo.SECTION }
     private val unavailableNote = Label().apply {
@@ -95,25 +106,41 @@ class DownloadPage(private val onOpenTasks: () -> Unit = {}) : Page {
 
     /** 会阻塞，所以整体扔后台线程。 */
     private fun loadVersions() {
-        hero.setLoading()
-        list.setLoading()
+        val attempts = Prefs.versionListSource.attempts
+        // 上次的清单先摆出来，再在后台刷新一次。国内直连官方清单常常要等满超时，
+        // 这十几秒里给一张白纸，用户会以为页面坏了。
+        val cached = RemoteVersion.cached(attempts.first().source)
+        if (cached != null) {
+            applyManifest(cached)
+        } else {
+            hero.setLoading()
+            list.setLoading()
+        }
+
         Thread {
-            val outcome = runCatching { RemoteVersion.load(Prefs.versionListSource.attempts) }
+            val outcome = runCatching { RemoteVersion.load(attempts) }
             Platform.runLater {
                 outcome
                     .onSuccess { result ->
-                        hero.setResult(result)
-                        install.setSource(result.source.label)
-                        list.setVersions(result.versions)
-                        community.setVersions(result.versions)
-                        community.setPreferred(preferredMcVersion())
+                        // 网络不通退到缓存时，跟刚才画的是同一份，不必再刷一遍
+                        if (cached == null || !result.fromCache) applyManifest(result)
                     }
                     .onFailure { e ->
-                        hero.setFailure()
-                        list.setFailure("版本清单获取失败：${e.message ?: e}") { loadVersions() }
+                        if (cached == null) {
+                            hero.setFailure()
+                            list.setFailure("版本清单获取失败：${e.message ?: e}") { loadVersions() }
+                        }
                     }
             }
         }.apply { isDaemon = true; name = "download-manifest" }.start()
+    }
+
+    private fun applyManifest(result: RemoteVersion.Result) {
+        hero.setResult(result)
+        install.setSource(result.source.label)
+        list.setVersions(result.versions)
+        community.setVersions(result.versions)
+        community.setPreferred(preferredMcVersion())
     }
 
     /**
@@ -169,9 +196,6 @@ class DownloadPage(private val onOpenTasks: () -> Unit = {}) : Page {
             ModKind.MODPACK ->
                 "整合包是一个带安装清单的压缩包，需要解包、按清单下载依赖，再合并覆盖文件。"
 
-            ModKind.DATAPACK ->
-                "数据包要装进某个存档的 datapacks 目录，需要先选定存档。"
-
             else -> ""
         }
     }
@@ -192,10 +216,17 @@ class DownloadPage(private val onOpenTasks: () -> Unit = {}) : Page {
     /** 「开始下载」：登记一个下载任务，退回列表，再跳到任务页看进度。 */
     private fun startDownload() {
         val entry = install.current ?: return
-        val root = BackendUtil.minecraftDir
-        val job = DownloadCenter.submit(entry, root, Prefs.fileSource, install.choice)
-        // Fabric 系：安装页那张卡片已经选好了 API 版本，等这次版本落地后再去取，不跟版本下载抢带宽
-        install.fabricApiVersionId?.let { FabricApi.afterVersionInstall(job.id, entry.id, root, it) }
+        // 装进首页当前选中的那份游戏目录。写死内置目录的话，多目录（multi 系 / 用户自加）
+        // 场景下版本会落到别处，跟随后装模组用的隔离目录彻底分家。
+        val root = gameRoot()
+        DownloadCenter.submit(
+            entry,
+            root,
+            Prefs.fileSource,
+            install.choice,
+            install.versionName,
+            install.fabricApiVersionId
+        )
         // 先退出安装页：任务页只是过去看一眼进度，回来时该落在版本列表上，
         // 而不是那个已经点过「开始下载」的确认页
         showList()
