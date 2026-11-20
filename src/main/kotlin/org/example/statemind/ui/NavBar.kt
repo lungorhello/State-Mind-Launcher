@@ -106,7 +106,7 @@ class NavBar(
                     "-fx-text-fill: #44444a; -fx-font-size: 13px; -fx-padding: 6 10 6 10;"
 
         const val COMPACT_ON =
-            "-fx-background-color: #efe6fd; -fx-background-radius: 6;" +
+            "-fx-background-color: #f7f3fe; -fx-background-radius: 6;" +
                     "-fx-text-fill: #6d28d9; -fx-font-size: 13px;" +
                     "-fx-padding: 6 10 6 10;"
 
@@ -123,7 +123,7 @@ class NavBar(
                     "-fx-cursor: hand;"
 
         const val NORMAL_ON =
-            "-fx-background-color: #efe6fd; -fx-background-radius: 10;" +
+            "-fx-background-color: #f7f3fe; -fx-background-radius: 10;" +
                     "-fx-text-fill: #6d28d9; -fx-font-size: 11px;" +
                     "-fx-padding: 6 4 6 4;" +
                     "-fx-focus-color: transparent; -fx-faint-focus-color: transparent;" +
