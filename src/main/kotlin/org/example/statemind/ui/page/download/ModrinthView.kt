@@ -618,7 +618,7 @@ internal class ModrinthView(
         val info = VBox(3.0, titleRow, desc, meta).apply { minWidth = 0.0 }
         HBox.setHgrow(info, Priority.ALWAYS)
 
-        val content = HBox(12.0, ModIcons.view(hit.iconUrl, 44.0), info).apply {
+        val content = HBox(12.0, ModIcons.view(hit.iconUrl, 48.0), info).apply {
             alignment = Pos.CENTER_LEFT
             padding = Insets(10.0, 16.0, 10.0, 16.0)
         }
