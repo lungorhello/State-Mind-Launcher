@@ -7,7 +7,13 @@ enum class LoaderKind(val label: String, val supported: Boolean) {
     FABRIC("Fabric", true),
     QUILT("Quilt", true),
 
-    /** 这两个要用官方安装器改文件，还没接 —— 先灰着，别让用户点进一条走不通的路。 */
-    NEOFORGE("NeoForge", false),
-    FORGE("Forge", false)
+    /** 官方安装器那套：下载后要跑一段 processor（见 core/install/ForgeInstall）。 */
+    FORGE("Forge", true),
+    NEOFORGE("NeoForge", true),
+
+    /** 只到 1.12.2，走 [LiteLoaderSource] 自己拼版本 json，不用官方安装器。 */
+    LITELOADER("LiteLoader", true),
+
+    /** 自带补丁器，改客户端 jar 后走 launchwrapper（见 core/install/OptiFineInstall）。 */
+    OPTIFINE("OptiFine", true)
 }
