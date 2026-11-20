@@ -608,7 +608,9 @@ object DownloadPlanner {
         val end = text.indexOf('"', i + 1)
         if (end < 0) return text
         val safe = id.replace("\\", "\\\\").replace("\"", "\\\"")
-        return text.substring(0, i) + safe + text.substring(end + 1)
+        // 切在引号内侧：i 是开引号、end 是闭引号，两边都要留着，否则 id 变成裸字面量 26.3-Fabric，
+        // 解析到第一个 '-' 就报「期望 '.' 或 '}'」。
+        return text.substring(0, i + 1) + safe + text.substring(end)
     }
 
     private fun number(value: Any?): Long = (value as? Number)?.toLong() ?: 0L
