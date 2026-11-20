@@ -9,6 +9,7 @@ import javafx.geometry.Pos
 import javafx.scene.Cursor
 import javafx.scene.Group
 import javafx.scene.control.Button
+import javafx.scene.control.ContentDisplay
 import javafx.scene.control.Label
 import javafx.scene.control.ProgressIndicator
 import javafx.scene.control.ScrollPane
@@ -38,13 +39,16 @@ import org.example.statemind.core.mod.ModInstaller
 import org.example.statemind.core.mod.ModKind
 import org.example.statemind.core.mod.ModNames
 import org.example.statemind.core.mod.Modrinth
+import org.example.statemind.ui.NavIcons
 import org.example.statemind.ui.Typo
 
 /**
  * 社区内容详情页：项目的介绍、可用版本，以及「装哪一个」。
  *
  * 整页一个滚动条：介绍长了、版本多了都能一路读下去，不给介绍单独开一条横向滚动。
- * 返回按钮与标题挤在同一行（PCL 也是这样），省下的那一行留给简介。
+ * 头部照 PCL 的排版：图标 + 标题 + 描述 + 提示信息挤成一列压在左上角，
+ * 操作按钮另起一行排在下面。返回除了左上角那颗叉号，还有一枚文字「返回」，
+ * 免得有人眼尖不到叉在哪。
  *
  * 版本列表一次取全（`/project/{id}/version`），筛选在本地做 —— 换游戏版本
  * 不该再等一轮网络。列表页会预先取回前几个项目的版本，点进来多数时候是现成的。
@@ -136,7 +140,7 @@ internal class ModDetailView(
         maxWidth = Double.MAX_VALUE
     }
 
-    private val openButton = Button("打开 Modrinth 页").apply {
+    private val openButton = Button("转到 Modrinth").apply {
         style = BTN_GHOST
         setOnAction { openInBrowser() }
     }
@@ -144,6 +148,41 @@ internal class ModDetailView(
         style = BTN_GHOST
         tooltip = Tooltip("复制项目的英文原名")
         setOnAction { copyTitle() }
+    }
+
+    /** 文字「返回」：给不认图标的人留一条路。跟叉号按钮做的是同一件事。 */
+    private val backButton = Button("返回").apply {
+        style = BTN_GHOST
+        setOnAction { onBack() }
+    }
+
+    /**
+     * 左上角那颗叉号。
+     *
+     * PCL 的详情页没有返回按钮（它是弹窗），我们有 —— 摆在标题左边会多出一条窄槽，
+     * 挤在图标和文字之间又别扭。这里把整块内容往右挪一点，留出一条窄槽放它。
+     */
+    private val crossButton: Button = Button().apply {
+        val icon = NavIcons.cross(14.0, Color.web(DownloadStyles.TEXT_DIM))
+        graphic = icon.node
+        contentDisplay = ContentDisplay.GRAPHIC_ONLY
+        tooltip = Tooltip("返回")
+        prefWidth = 24.0
+        prefHeight = 24.0
+        minWidth = 24.0
+        minHeight = 24.0
+        maxWidth = 24.0
+        maxHeight = 24.0
+        style = ICON_BTN
+        setOnMouseEntered {
+            style = ICON_BTN_HOVER
+            icon.color = Color.web(DownloadStyles.TEXT)
+        }
+        setOnMouseExited {
+            style = ICON_BTN
+            icon.color = Color.web(DownloadStyles.TEXT_DIM)
+        }
+        setOnAction { onBack() }
     }
 
     /** 当前选中的版本系列；null = 全部。 */
@@ -194,26 +233,37 @@ internal class ModDetailView(
     }
 
     init {
-        val back = Button("返回").apply {
-            style = BTN_GHOST_COMPACT
-            setOnAction { onBack() }
+        openButton.style = BTN_GHOST
+        copyButton.style = BTN_GHOST
+        backButton.style = BTN_GHOST
+
+        // 左边留一条窄槽给叉号：图标和文字整体往右挪一点，不为它单开一行。
+        // PCL 的详情页是弹窗、没有返回，我们有 —— 就塞在这条缝里。
+        val slot = VBox(0.0, crossButton).apply {
+            alignment = Pos.TOP_LEFT
+            padding = Insets(2.0, 0.0, 0.0, 0.0)
         }
 
-        openButton.style = BTN_INLINE
-        copyButton.style = BTN_INLINE
-        // 一行：返回、标题、两颗小按钮。窗口窄了压标题（省略号），不往下折行
-        val titleRow = HBox(10.0, back, title, openButton, copyButton).apply {
-            alignment = Pos.CENTER_LEFT
-        }
-        HBox.setHgrow(title, Priority.ALWAYS)
-
-        val info = VBox(4.0, titleRow, meta, desc).apply { minWidth = 0.0 }
+        // 图标 + 标题 + 描述 + 元信息：挤成一列，像 PCL 那样整块压在左上角。
+        // 顺序照 PCL：标题 → 描述 → 提示信息（作者 / 下载量）。
+        val info = VBox(4.0, title, desc, meta).apply { minWidth = 0.0 }
         HBox.setHgrow(info, Priority.ALWAYS)
 
-        val headerCard = HBox(14.0, iconBox, info).apply {
+        val identity = HBox(12.0, iconBox, info).apply {
+            alignment = Pos.TOP_LEFT
+            minWidth = 0.0
+        }
+        HBox.setHgrow(identity, Priority.ALWAYS)
+
+        val headerCard = HBox(8.0, slot, identity).apply {
             alignment = Pos.TOP_LEFT
             padding = Insets(14.0)
             style = DownloadStyles.CARD
+        }
+
+        // 按钮另起一行排在下面：PCL 就是这么摆的（转到 Modrinth / 复制名称）。
+        val actionRow = HBox(8.0, backButton, openButton, copyButton).apply {
+            alignment = Pos.CENTER_LEFT
         }
 
         val filterCard = VBox(8.0, chipsBox).apply {
@@ -223,7 +273,7 @@ internal class ModDetailView(
 
         scroll.apply {
             contentProperty().set(
-                VBox(12.0, headerCard, filterCard, switchBar, note, rows)
+                VBox(12.0, headerCard, actionRow, filterCard, switchBar, note, rows)
             )
             isFitToWidth = true
             hbarPolicy = ScrollPane.ScrollBarPolicy.NEVER
@@ -722,18 +772,14 @@ internal class ModDetailView(
             }
         }
 
-        /** 标题行里那颗「返回」：比普通按钮矮一点，跟 18px 标题同一行才不显得笨。 */
-        const val BTN_GHOST_COMPACT =
-            "-fx-background-color: #ffffff; -fx-border-color: #d4d4d8; -fx-border-width: 1;" +
-                    "-fx-border-radius: 8; -fx-background-radius: 8;" +
-                    "-fx-text-fill: #52525b; -fx-font-size: 12px; -fx-padding: 3 10 3 10;" +
-                    "-fx-cursor: hand;"
-
-        /** 标题行右侧那两颗：浅色、无边框，跟着标题走。 */
-        const val BTN_INLINE =
+        /** 只有图标的按钮（叉号）：默认透明，悬停才给个底。 */
+        const val ICON_BTN =
             "-fx-background-color: transparent; -fx-background-radius: 6;" +
-                    "-fx-text-fill: ${DownloadStyles.ACCENT_TEXT}; -fx-font-size: 12px;" +
-                    "-fx-padding: 2 6 2 6; -fx-cursor: hand;"
+                    "-fx-padding: 0; -fx-cursor: hand;"
+
+        const val ICON_BTN_HOVER =
+            "-fx-background-color: #f0f0f4; -fx-background-radius: 6;" +
+                    "-fx-padding: 0; -fx-cursor: hand;"
 
         const val BTN_GHOST =
             "-fx-background-color: #ffffff; -fx-border-color: #d4d4d8; -fx-border-width: 1;" +
