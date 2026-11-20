@@ -1,5 +1,6 @@
 package org.example.statemind.ui.page.download
 
+import java.io.File
 import javafx.application.Platform
 import javafx.geometry.Insets
 import javafx.geometry.Pos
@@ -7,13 +8,15 @@ import javafx.scene.Cursor
 import javafx.scene.control.Button
 import javafx.scene.control.ComboBox
 import javafx.scene.control.Label
+import javafx.scene.control.ListCell
+import javafx.scene.control.TextField
 import javafx.scene.control.Tooltip
 import javafx.scene.layout.BorderPane
 import javafx.scene.layout.HBox
 import javafx.scene.layout.Priority
 import javafx.scene.layout.Region
 import javafx.scene.layout.VBox
-import javafx.util.StringConverter
+import javafx.scene.paint.Color
 import org.example.statemind.core.VersionEntry
 import org.example.statemind.core.loader.LoaderChoice
 import org.example.statemind.core.loader.LoaderKind
@@ -21,62 +24,89 @@ import org.example.statemind.core.loader.LoaderSource
 import org.example.statemind.core.loader.LoaderVersion
 import org.example.statemind.core.mod.FabricApi
 import org.example.statemind.core.mod.Modrinth
+import org.example.statemind.ui.NavIcons
 import org.example.statemind.ui.Typo
 
 /**
- * 选好原版版本之后的那一页：挑加载器，然后开始下载。
+ * 选好游戏版本之后那一页：装不装加载器、装哪个、这个版本叫什么名字。
  *
- * 加载器排成竖排、一行一个，选中的那一行才展开版本下拉 —— 横着一排按钮既放不下
- * 「这个版本有没有它」的信息，窗口一窄还会被压成几个省略号。
+ * 加载器一行一个直接摆出来。**原版就是一行都不选**，不再单独占一行写「原版」——
+ * 之前把它当成一种可选加载器，进来只看得见一行「模组加载器 原版」，既没说有什么可选，
+ * 也让人以为原版是个需要挑的东西。
  *
- * 每个游戏版本能用的加载器并不一样（1.0 一个都没有、1.14 起才有 Fabric、快照常常只有 Fabric），
- * 所以每行右侧直接写这个版本下的实际情况，没有安装包的行点不动。
+ * 选中一行后展开的是**这张卡自己**：版本下拉长在行下面，卡片变高，页面上不多出别的行。
+ * Fabric / Quilt 选完版本再往下接一块 Fabric API，跟版本下拉同宽同左边界。
+ * 其余几行留在原地，标「与 X 不兼容」—— 一个实例只能挂一个加载器。
+ *
+ * 这个游戏版本根本没有某个加载器的安装包时（老版本、快照），那一行直接不出现，
+ * 而不是留一条写着「无」的空行。
+ *
+ * 顶上的输入框就是这个版本的文件夹名：默认按「游戏版本-加载器 加载器版本」填好，可以改。
  *
  * 左下角必须标出下载源 —— BMCLAPI 的条款要求下载界面说明来源。
  */
 internal class VersionInstallView(
     private val onBack: () -> Unit,
-    private val onStart: () -> Unit
+    private val onStart: () -> Unit,
+    /** 下载落点：首页选中版本所在的那份游戏目录。改名查重、写 json 都按它算。 */
+    private val root: () -> File
 ) : BorderPane() {
 
-    private val versionLabel = Label()
-    private val sourceNote = Label()
-    private val loaderNote = Label()
-    private val rowsBox = VBox(8.0)
-
-    /** 每一行里要随状态改的零件。 */
-    private val rowBoxes = HashMap<LoaderKind, VBox>()
-    private val nameLabels = HashMap<LoaderKind, Label>()
-    private val stateLabels = HashMap<LoaderKind, Label>()
-    private val expandBoxes = HashMap<LoaderKind, VBox>()
-    private val comboBoxes = HashMap<LoaderKind, ComboBox<LoaderVersion>>()
-
-    /** 这个游戏版本下查到的加载器版本表；null = 还没查过。 */
-    private val versions = HashMap<LoaderKind, List<LoaderVersion>>()
-
-    private var selected: LoaderKind = LoaderKind.VANILLA
-
-    /** 程序自己往下拉里填值时置真：那不是用户的选择，别拿它去更新 [choice]。 */
-    private var filling = false
-
-    // ---------- Fabric API 那张卡片 ----------
-
-    /** 选中 Fabric / Quilt 且加载器版本确定之后，这张卡片才出现。 */
-    private val apiState = Label().apply { style = Typo.NOTE }
-    private val apiCombo = ComboBox<Modrinth.Version>()
-    private val apiExpand = VBox()
-    private val apiRow = VBox()
-
-    /** 卡片是否展开着。默认收起，只写当前选中的 API 版本号。 */
-    private var apiOpen = false
-
-    /** 每次换游戏版本 +1：晚回来的旧 API 列表丢掉。 */
-    private var apiGeneration = 0
+    /**
+     * 一行加载器 = 一整张卡片。卡片里面是标题行 + 展开区，
+     * 选中之后往下长的是这张卡自己，页面上不会多出别的行。
+     */
+    private class Row(
+        val card: VBox,
+        val head: HBox,
+        val name: Label,
+        val state: Label,
+        val expand: VBox,
+        val combo: ComboBox<LoaderVersion>
+    )
 
     private val startButton = Button("开始下载").apply {
         style = BTN_PRIMARY
         setOnAction { onStart() }
     }
+
+    private val nameField = TextField()
+    private val nameHint = Label()
+    private val rowsBox = VBox(8.0)
+    private val rows = LinkedHashMap<LoaderKind, Row>()
+    private val loaderNote = Label()
+    private val sourceNote = Label()
+
+    private val apiCombo = ComboBox<Modrinth.Version>()
+
+    /** Fabric API 那一块：跟版本下拉同宽同左边界，挂在选中那张卡片的展开区里。 */
+    private val apiRow = VBox(6.0)
+
+    /** 这个游戏版本下查到的加载器版本表；null = 还没查过。 */
+    private val versions = HashMap<LoaderKind, List<LoaderVersion>>()
+
+    /** 清单没读回来的加载器。不留着这个，右边会一直写「获取中……」。 */
+    private val failed = HashSet<LoaderKind>()
+
+    /** null = 原版（不装加载器）。 */
+    private var selected: LoaderKind? = null
+
+    /** 程序自己往控件里填值时置真：那不是用户的动作。 */
+    private var filling = false
+
+    /** 用户改过版本名之后就不再跟着加载器自动改，免得把他刚敲的字冲掉。 */
+    private var nameEdited = false
+
+    private var apiReady = false
+    private var apiMc: String? = null
+
+    /** 每次换加载器 +1：晚回来的旧结果丢掉。 */
+    private var generation = 0
+
+    /** 加载器可用性的批次号。跟 [generation] 分开：点一行不该让「这版能用哪些加载器」作废。 */
+    private var availabilityGen = 0
+
+    private var apiGeneration = 0
 
     /** 这一页正在准备下载哪个版本。 */
     var current: VersionEntry? = null
@@ -85,6 +115,9 @@ internal class VersionInstallView(
     /** 选中的加载器；原版为 null。 */
     var choice: LoaderChoice? = null
         private set
+
+    /** 下载后的版本名，也就是 `versions/` 下的文件夹名。 */
+    val versionName: String get() = nameField.text.trim()
 
     /**
      * 会一起装上的 Fabric API 版本 id；原版 / 以后接上的 Forge 为 null。
@@ -96,28 +129,44 @@ internal class VersionInstallView(
             apiCombo.value?.id
         } else null
 
-    /** 每次换加载器 +1：后台线程回来的结果对不上就丢掉。 */
-    private var generation = 0
-
-    /** 加载器可用性的批次号。跟 [generation] 分开：点一行不该让「这版能用哪些加载器」作废。 */
-    private var availabilityGen = 0
-
     init {
         padding = Insets(DownloadStyles.PAGE_PADDING)
 
-        top = HBox(
-            Button("返回").apply {
-                style = BACK_STYLE
-                setOnAction { onBack() }
+        nameField.apply {
+            style = DownloadStyles.FIELD
+            maxWidth = Double.MAX_VALUE
+            tooltip = Tooltip("下载后的版本名，也是 versions 下的文件夹名。")
+            textProperty().addListener { _, _, _ ->
+                if (!filling) {
+                    nameEdited = true
+                    validate()
+                }
             }
-        ).apply { alignment = Pos.CENTER_LEFT }
+        }
 
-        versionLabel.style =
-            "-fx-font-size: 24px; -fx-font-weight: bold; -fx-text-fill: ${DownloadStyles.TEXT};"
+        nameHint.apply {
+            style = Typo.NOTE + "-fx-text-fill: $ERROR_TEXT;"
+            // 固定占位：出现提示时下面的列表不整体往下跳，按钮也不会被顶走
+            minHeight = HINT_HEIGHT
+            prefHeight = HINT_HEIGHT
+            maxHeight = HINT_HEIGHT
+            isWrapText = true
+        }
 
-        val loaderTitle = Label("模组加载器").apply { style = Typo.LABEL }
+        val back = Button().apply {
+            graphic = NavIcons.back(16.0, Color.web(DownloadStyles.TEXT)).node
+            style = BACK_STYLE
+            tooltip = Tooltip("返回版本列表")
+            setOnAction { onBack() }
+        }
 
-        LoaderKind.entries.forEach { rowsBox.children += loaderRow(it) }
+        val topRow = HBox(10.0, back, nameField).apply { alignment = Pos.CENTER_LEFT }
+        HBox.setHgrow(nameField, Priority.ALWAYS)
+
+        LOADER_ORDER.forEach { kind ->
+            rows[kind] = buildRow(kind)
+            rowsBox.children += rows.getValue(kind).card
+        }
         buildApiRow()
 
         loaderNote.style = Typo.NOTE
@@ -125,10 +174,10 @@ internal class VersionInstallView(
         loaderNote.maxWidth = 460.0
 
         center = VBox(
-            10.0,
-            versionLabel,
-            Region().apply { minHeight = 10.0; prefHeight = 10.0; maxHeight = 10.0 },
-            loaderTitle,
+            6.0,
+            topRow,
+            nameHint,
+            Region().apply { minHeight = 8.0; prefHeight = 8.0; maxHeight = 8.0 },
             rowsBox,
             loaderNote
         ).apply {
@@ -136,37 +185,34 @@ internal class VersionInstallView(
             padding = Insets(18.0, 0.0, 0.0, 0.0)
         }
 
-        sourceNote.style = "-fx-font-size: 12px; -fx-text-fill: ${DownloadStyles.TEXT_DIM};"
+        sourceNote.style = Typo.NOTE + "-fx-text-fill: ${DownloadStyles.TEXT_DIM};"
         bottom = HBox(
             10.0, sourceNote,
             Region().apply { HBox.setHgrow(this, Priority.ALWAYS) },
             startButton
         ).apply { alignment = Pos.CENTER_LEFT }
 
-        refreshStyles()
+        refreshUi()
     }
 
     fun show(entry: VersionEntry) {
         current = entry
-        versionLabel.text = entry.id
         versions.clear()
-        comboBoxes.forEach { (_, combo) ->
-            combo.items.clear()
-            combo.value = null
+        failed.clear()
+        rows.values.forEach {
+            it.combo.items.clear()
+            it.combo.value = null
         }
-        selected = LoaderKind.VANILLA
+        selected = null
         choice = null
-        loaderNote.text = ""
-        startButton.isDisable = false
-        // API 的列表是按游戏版本查的，换版本就得作废
+        nameEdited = false
+        apiReady = false
+        apiMc = null
         apiGeneration++
         apiCombo.items.clear()
         apiCombo.value = null
-        apiState.text = ""
-        openApi(false)
-        apiRow.isVisible = false
-        apiRow.isManaged = false
-        refreshStyles()
+        loaderNote.text = ""
+        refreshUi()
 
         // 老版本、快照、愚人节版本多半只有一个加载器可装：先问清楚，
         // 别让人点进去才发现「没有可用版本」。答案进了 LoaderSource 的缓存。
@@ -180,188 +226,215 @@ internal class VersionInstallView(
 
     // ---------- 行 ----------
 
-    /**
-     * Fabric API 那张卡片：一行标题 + 当前选中的版本号，点一下才展开版本下拉。
-     *
-     * 选了 Fabric 就自动挑这个游戏版本能用的最新一批 —— 加载器装好了却没有前置，
-     * 用户下一分钟就会看到一片模组加载失败。想换旧版本可以展开下拉自己选。
-     */
-    private fun buildApiRow() {
-        apiCombo.apply {
-            style = DownloadStyles.FIELD
-            maxWidth = Double.MAX_VALUE
-            visibleRowCount = 6
-            converter = object : StringConverter<Modrinth.Version>() {
-                override fun toString(value: Modrinth.Version?): String =
-                    value?.let { it.number.ifBlank { it.name } }.orEmpty()
-
-                override fun fromString(text: String?): Modrinth.Version? = null
-            }
-            valueProperty().addListener { _, _, now ->
-                if (now != null) apiState.text = now.number.ifBlank { now.name }
-            }
-        }
-        val name = Label("Fabric API").apply {
-            style = "-fx-font-size: 13px; -fx-text-fill: ${DownloadStyles.TEXT};"
-        }
-        val head = HBox(
-            8.0, name,
-            Region().apply { HBox.setHgrow(this, Priority.ALWAYS) },
-            apiState
-        ).apply {
-            alignment = Pos.CENTER_LEFT
-            cursor = Cursor.HAND
-            setOnMouseClicked { openApi(!apiOpen) }
-        }
-
-        apiExpand.children.setAll(apiCombo)
-        apiExpand.padding = Insets(6.0, 0.0, 0.0, 0.0)
-        apiExpand.isVisible = false
-        apiExpand.isManaged = false
-
-        apiRow.children.setAll(head, apiExpand)
-        apiRow.style = "-fx-background-color: #ffffff; -fx-border-color: #e4e4e9;" +
-                "-fx-border-width: 1; -fx-border-radius: 8; -fx-background-radius: 8;"
-        apiRow.padding = Insets(9.0, 10.0, 9.0, 10.0)
-        apiRow.isVisible = false
-        apiRow.isManaged = false
-    }
-
-    private fun openApi(open: Boolean) {
-        apiOpen = open
-        apiExpand.isVisible = open
-        apiExpand.isManaged = open
-    }
-
-    /** 按游戏版本查一次 API 列表，默认选最新那个。 */
-    private fun loadApi(mc: String) {
-        apiGeneration++
-        val mine = apiGeneration
-        openApi(false)
-        apiCombo.items.clear()
-        apiCombo.value = null
-        apiState.text = "读取中…"
-        Thread {
-            val list = runCatching { FabricApi.versionsFor(mc) }.getOrDefault(emptyList())
-            Platform.runLater {
-                if (mine != apiGeneration) return@runLater
-                if (list.isEmpty()) {
-                    apiState.text = "无"
-                    apiRow.isVisible = false
-                    apiRow.isManaged = false
-                    return@runLater
-                }
-                apiCombo.items.setAll(list)
-                apiCombo.value = list.first()
-                refreshStyles()
-            }
-        }.apply { isDaemon = true; name = "fabric-api-versions" }.start()
-    }
-
-    private fun loaderRow(kind: LoaderKind): VBox {
-        val name = Label(kind.label).apply {
-            style = "-fx-font-size: 14px; -fx-text-fill: ${DownloadStyles.TEXT};"
-        }
+    private fun buildRow(kind: LoaderKind): Row {
+        val name = Label(kind.label)
         val state = Label().apply { style = Typo.NOTE }
 
         val head = HBox(
             10.0, name,
             Region().apply { HBox.setHgrow(this, Priority.ALWAYS) },
             state
-        ).apply { alignment = Pos.CENTER_LEFT }
+        ).apply {
+            alignment = Pos.CENTER_LEFT
+            padding = Insets(11.0, 14.0, 11.0, 14.0)
+            minHeight = ROW_HEIGHT
+            prefHeight = ROW_HEIGHT
+            maxHeight = ROW_HEIGHT
+        }
 
         val combo = ComboBox<LoaderVersion>().apply {
             style = DownloadStyles.FIELD
             maxWidth = Double.MAX_VALUE
             visibleRowCount = 8
-            // 下拉里连「稳定版 / 测试版」一起显示，跟 PCL 一样能一眼看出哪个是正式发布
-            converter = object : StringConverter<LoaderVersion>() {
-                override fun toString(value: LoaderVersion?): String =
-                    value?.let { "${it.id}    ${it.label}" }.orEmpty()
-
-                override fun fromString(text: String?): LoaderVersion? = null
+            // 展开时才带「稳定版 / 测试版」；收起时只留版本号，跟 PCL 一样干净
+            setCellFactory {
+                object : ListCell<LoaderVersion>() {
+                    override fun updateItem(item: LoaderVersion?, empty: Boolean) {
+                        super.updateItem(item, empty)
+                        text = if (empty || item == null) null else "${item.id}    ${item.label}"
+                    }
+                }
+            }
+            buttonCell = object : ListCell<LoaderVersion>() {
+                override fun updateItem(item: LoaderVersion?, empty: Boolean) {
+                    super.updateItem(item, empty)
+                    text = if (empty || item == null) null else item.id
+                }
             }
             valueProperty().addListener { _, _, now -> onLoaderVersion(now, kind) }
         }
 
-        val expand = VBox(combo).apply {
+        val expand = VBox(6.0, small("加载器版本"), combo).apply {
+            padding = Insets(0.0, 14.0, 14.0, 14.0)
             isVisible = false
             isManaged = false
-            padding = Insets(8.0, 0.0, 0.0, 0.0)
         }
 
-        val row = VBox(head, expand).apply {
-            style = ROW
-            padding = Insets(11.0, 14.0, 11.0, 14.0)
-        }
+        val card = VBox(head, expand).apply { style = ROW }
 
         if (kind.supported) {
             head.setOnMouseClicked { select(kind) }
+            // 白底行跟灰行只差字体颜色，悬停不亮一下就看不出能点
+            head.setOnMouseEntered { if (kind != selected && usable(kind)) card.style = ROW_HOVER }
+            head.setOnMouseExited { if (kind != selected) card.style = cardStyle(kind) }
         } else {
             // 灰行也给个说法，不然只会看起来「坏了」
-            Tooltip.install(row, Tooltip("暂不支持，需要用官方安装器改装，后续版本接上"))
+            Tooltip.install(head, Tooltip("暂不支持，需要用官方安装器改装，后续版本接上"))
         }
 
-        rowBoxes[kind] = row
-        nameLabels[kind] = name
-        stateLabels[kind] = state
-        expandBoxes[kind] = expand
-        comboBoxes[kind] = combo
-        return row
+        return Row(card, head, name, state, expand, combo)
     }
+
+    /**
+     * Fabric API 那一块。选中 Fabric / Quilt 且列表到了才挂进展开区，
+     * 默认挑这个游戏版本下最新的一个 —— 加载器装好了却没有前置，下一分钟就是一片模组加载失败。
+     */
+    private fun buildApiRow() {
+        apiCombo.apply {
+            style = DownloadStyles.FIELD
+            maxWidth = Double.MAX_VALUE
+            visibleRowCount = 6
+            setCellFactory {
+                object : ListCell<Modrinth.Version>() {
+                    override fun updateItem(item: Modrinth.Version?, empty: Boolean) {
+                        super.updateItem(item, empty)
+                        text = if (empty || item == null) null else "${item.number.ifBlank { item.name }}    ${item.name}"
+                    }
+                }
+            }
+            buttonCell = object : ListCell<Modrinth.Version>() {
+                override fun updateItem(item: Modrinth.Version?, empty: Boolean) {
+                    super.updateItem(item, empty)
+                    text = if (empty || item == null) null else item.number.ifBlank { item.name }
+                }
+            }
+        }
+        apiRow.children.setAll(small("Fabric API"), apiCombo)
+        // 跟上面那个下拉之间多留一点，两块才看得出是分开的
+        apiRow.padding = Insets(6.0, 0.0, 0.0, 0.0)
+    }
+
+    /** 展开区里的小标题。宽度由展开区统一给，它不占列宽，两个下拉因此左边界一样。 */
+    private fun small(text: String): Label = Label(text).apply { style = Typo.DIM }
 
     /** 这一行现在能不能点：不支持的不行，这个版本下确实没有安装包的也不行。 */
-    private fun usable(kind: LoaderKind): Boolean = when {
-        !kind.supported -> false
-        kind == LoaderKind.VANILLA -> true
-        else -> versions[kind]?.isNotEmpty() != false
+    private fun usable(kind: LoaderKind): Boolean =
+        kind.supported && versions[kind]?.isEmpty() != true
+
+    /**
+     * 右边那句灰字。已经装了一种加载器就直说「不兼容」——
+     * 一个实例只能挂一个加载器，这比留白或者让人自己试要清楚。
+     */
+    private fun stateText(kind: LoaderKind): String {
+        if (selected == kind) return ""
+        selected?.let { return "与${it.label}不兼容" }
+        return when {
+            !kind.supported -> "暂不支持"
+            versions[kind] == null -> if (kind in failed) "读取失败" else "获取中……"
+            else -> ""
+        }
     }
 
-    private fun stateText(kind: LoaderKind): String = when {
-        !kind.supported -> "暂不支持"
-        kind == LoaderKind.VANILLA -> if (selected == kind) "使用中" else ""
-        selected == kind -> "使用中"
-        versions[kind] == null -> "读取中…"
-        versions[kind]!!.isEmpty() -> "无"
-        else -> "${versions[kind]!!.size} 个版本"
-    }
+    // ---------- 刷新 ----------
 
-    private fun refreshStyles() {
-        for ((kind, row) in rowBoxes) {
-            val on = kind == selected
+    private fun refreshUi() {
+        for ((kind, row) in rows) {
+            val active = kind == selected
             val ok = usable(kind)
-            val fill = when {
-                on -> DownloadStyles.ACCENT_TEXT
+            // 这一版压根装不了这个加载器（老版本、快照）：整行收起来，不留一条写着「无」的空行
+            val gone = versions[kind]?.isEmpty() == true
+            row.card.isVisible = !gone
+            row.card.isManaged = !gone
+            row.card.style = cardStyle(kind)
+            row.head.cursor = if (ok) Cursor.HAND else Cursor.DEFAULT
+            val nameFill = when {
+                active -> DownloadStyles.ACCENT_TEXT
                 !ok -> DownloadStyles.TEXT_FAINT
                 else -> DownloadStyles.TEXT
             }
-            row.style = when {
-                on -> ROW_ON
-                !ok -> ROW_OFF
-                else -> ROW
+            row.name.style = Typo.LABEL + "-fx-text-fill: $nameFill;"
+            val stateFill = when {
+                active -> DownloadStyles.ACCENT_TEXT
+                !ok -> DownloadStyles.TEXT_FAINT
+                else -> DownloadStyles.TEXT_DIM
             }
-            row.cursor = if (ok) Cursor.HAND else Cursor.DEFAULT
-            nameLabels[kind]?.style = "-fx-font-size: 14px; -fx-text-fill: $fill;"
-            stateLabels[kind]?.apply {
-                text = stateText(kind)
-                style = Typo.NOTE + "-fx-text-fill: " +
-                        (if (on) DownloadStyles.ACCENT_TEXT else DownloadStyles.TEXT_DIM) + ";"
-            }
-            val expand = expandBoxes[kind]
-            val open = on && kind != LoaderKind.VANILLA && versions[kind]?.isNotEmpty() == true
-            expand?.isVisible = open
-            expand?.isManaged = open
-            // Fabric 系那一行展开时，版本下拉下面多挂一张 Fabric API 卡片 ——
-            // PCL 也是把它放在这一栏里，而不是单独摆在整页底下。切到原版就跟着一起收起。
-            if (open && (kind == LoaderKind.FABRIC || kind == LoaderKind.QUILT)) {
-                expand?.children?.setAll(comboBoxes[kind], apiRow)
-            }
+            row.state.text = stateText(kind)
+            row.state.style = Typo.NOTE + "-fx-text-fill: $stateFill;"
         }
-        // 只在这一行选中、且 API 列表已经到了的时候露出来
-        val showApi = (selected == LoaderKind.FABRIC || selected == LoaderKind.QUILT) &&
-                apiCombo.items.isNotEmpty()
-        apiRow.isVisible = showApi
-        apiRow.isManaged = showApi
+        syncExpansion()
+        syncName()
+        validate()
+    }
+
+    private fun cardStyle(kind: LoaderKind): String = when {
+        kind == selected -> ROW_ON
+        !usable(kind) -> ROW_OFF
+        else -> ROW
+    }
+
+    /**
+     * 展开区只属于选中的那一行。API 那块同一时刻只能待在一张卡里 ——
+     * 一个节点只能有一个父节点，所以先让别的卡片撒手，再挂上去。
+     */
+    private fun syncExpansion() {
+        val showApi = apiReady && (selected == LoaderKind.FABRIC || selected == LoaderKind.QUILT)
+        val host = if (showApi) selected?.let { rows[it] }?.expand else null
+
+        for ((kind, row) in rows) {
+            val open = kind == selected
+            row.expand.isVisible = open
+            row.expand.isManaged = open
+            if (row.expand !== host) row.expand.children.remove(apiRow)
+        }
+        if (host != null && !host.children.contains(apiRow)) host.children.add(apiRow)
+    }
+
+    private fun syncName() {
+        if (nameEdited) return
+        filling = true
+        nameField.text = autoName()
+        filling = false
+    }
+
+    /** 没改过名时按当前选择拼一个：原版是版本号，加载器版本是「版本号-加载器 加载器版本」。 */
+    private fun autoName(): String {
+        val entry = current ?: return ""
+        val kind = selected ?: return freeName(entry.id)
+        val version = rows[kind]?.combo?.value?.id ?: return freeName(entry.id)
+        return freeName("${entry.id}-${kind.label} $version")
+    }
+
+    /** 同名目录已经在了就往后加序号 —— 下载新版本不该覆盖掉已经装好的那份。 */
+    private fun freeName(base: String): String {
+        if (!File(root(), "versions/$base").exists()) return base
+        var index = 2
+        while (File(root(), "versions/$base-$index").exists()) index++
+        return "$base-$index"
+    }
+
+    private fun validate() {
+        // 还没选游戏版本时这一页是藏着的，不必报「版本名为空」
+        val problem = if (current == null) null else nameProblem()
+        nameHint.text = problem.orEmpty()
+        startButton.isDisable =
+            current == null || problem != null || (selected != null && choice == null)
+    }
+
+    /**
+     * 版本名要能直接当文件夹名用。这里挡的是系统层面的问题，
+     * 「和已有版本重名」也算 —— 否则 [freeName] 之外的手改会悄悄覆盖别人。
+     */
+    private fun nameProblem(): String? {
+        val name = versionName
+        return when {
+            name.isEmpty() -> "版本名不能为空。"
+            name.length > NAME_MAX -> "版本名过长。"
+            name.any { it in ILLEGAL_CHARS } -> "版本名含有文件名不允许的字符。"
+            name.endsWith(".") || name.endsWith(" ") -> "版本名不能以点或空格结尾。"
+            name.substringBefore('.').uppercase() in RESERVED_NAMES -> "这个名称不能用作版本名。"
+            File(root(), "versions/$name").exists() -> "versions 下已有同名版本。"
+            else -> null
+        }
     }
 
     // ---------- 选择 ----------
@@ -369,40 +442,38 @@ internal class VersionInstallView(
     private fun select(kind: LoaderKind) {
         if (!usable(kind)) return
 
-        selected = kind
+        // 再点一次选中的那一行 = 不装加载器（原版）
+        val next = if (selected == kind) null else kind
+        selected = next
         generation++
         choice = null
+        loaderNote.text = ""
+
         val entry = current
-
-        if (kind == LoaderKind.VANILLA || entry == null) {
-            loaderNote.text = ""
-            startButton.isDisable = false
-            refreshStyles()
+        if (next == null || entry == null) {
+            refreshUi()
             return
         }
+        refreshUi()
 
-        startButton.isDisable = true
-        refreshStyles()
-
-        val mc = entry.id
         // 这一版之前查过就直接用：来回点不该每次都再等一轮网络
-        val cached = versions[kind] ?: LoaderSource.cached(kind, mc)
+        val cached = versions[next] ?: LoaderSource.cached(next, entry.id)
         if (cached != null) {
-            applyVersions(kind, cached)
+            applyVersions(next, cached)
             return
         }
 
-        loaderNote.text = "读取${kind.label}版本…"
         val mine = generation
         Thread {
-            val outcome = runCatching { LoaderSource.versions(kind, mc) }
+            val outcome = runCatching { LoaderSource.versions(next, entry.id) }
             Platform.runLater {
                 if (mine != generation) return@runLater
                 outcome
-                    .onSuccess { applyVersions(kind, it) }
+                    .onSuccess { applyVersions(next, it) }
                     .onFailure {
-                        loaderNote.text = "读取失败：${it.message ?: "网络错误"}"
-                        refreshStyles()
+                        failed += next
+                        loaderNote.text = "读取${next.label}版本失败：${it.message ?: "网络错误"}"
+                        refreshUi()
                     }
             }
         }.apply { isDaemon = true; name = "loader-versions" }.start()
@@ -411,19 +482,18 @@ internal class VersionInstallView(
     /** 把某一版的加载器版本填进下拉。空表 = 这个游戏版本确实没有对应安装包。 */
     private fun applyVersions(kind: LoaderKind, list: List<LoaderVersion>) {
         versions[kind] = list
+        failed -= kind
         if (list.isEmpty()) {
-            loaderNote.text = "${current?.id.orEmpty()} 没有可用的${kind.label}版本"
             if (selected == kind) {
-                selected = LoaderKind.VANILLA
+                selected = null
                 choice = null
-                startButton.isDisable = false
+                loaderNote.text = "${current?.id.orEmpty()} 没有可用的${kind.label}版本"
             }
-            refreshStyles()
+            refreshUi()
             return
         }
 
-        loaderNote.text = ""
-        val combo = comboBoxes[kind]
+        val combo = rows[kind]?.combo
         filling = true
         combo?.items?.setAll(list)
         combo?.value = list.first()
@@ -431,55 +501,118 @@ internal class VersionInstallView(
         val entry = current
         if (selected == kind && entry != null && combo?.value != null) {
             choice = LoaderSource.choice(kind, entry.id, combo.value.id)
-            startButton.isDisable = false
+            // 只有 Fabric 系需要前置；LiteLoader 自己的库在它那份 json 里
+            if (kind == LoaderKind.FABRIC || kind == LoaderKind.QUILT) loadApi(entry.id)
         }
-        if (selected == kind && entry != null) loadApi(entry.id)
-        refreshStyles()
+        refreshUi()
     }
 
     /** 一次问清这个游戏版本能用哪些加载器，免得用户挨个点。 */
     private fun checkLoaders(mc: String, batch: Int) {
-        val targets = LoaderKind.entries.filter { it.supported && it != LoaderKind.VANILLA }
+        val targets = LOADER_ORDER.filter { it.supported }
         val known = targets.mapNotNull { kind -> LoaderSource.cached(kind, mc)?.let { kind to it } }.toMap()
-        if (known.isNotEmpty()) {
-            versions.putAll(known)
-            refreshStyles()
-        }
+        if (known.isNotEmpty()) versions.putAll(known)
         val missing = targets.filter { versions[it] == null }
-        if (missing.isEmpty()) return
+        if (missing.isEmpty()) {
+            refreshUi()
+            return
+        }
+        refreshUi()
 
         Thread {
-            val found = HashMap<LoaderKind, List<LoaderVersion>>()
-            for (kind in missing) {
-                runCatching { LoaderSource.versions(kind, mc) }.onSuccess { found[kind] = it }
+            // 几份清单互不相干：串行问，慢网络上要等好几个超时；并行只等最慢的那一个
+            val found = java.util.concurrent.ConcurrentHashMap<LoaderKind, List<LoaderVersion>>()
+            val broken = java.util.concurrent.ConcurrentHashMap.newKeySet<LoaderKind>()
+            val workers = missing.map { kind ->
+                Thread {
+                    runCatching { LoaderSource.versions(kind, mc) }
+                        .onSuccess { found[kind] = it }
+                        .onFailure { broken += kind }
+                }.apply { isDaemon = true; start() }
             }
+            workers.forEach { runCatching { it.join(30_000) } }
             Platform.runLater {
                 // 期间换了版本，这批结果就作废
                 if (batch != availabilityGen || current?.id != mc) return@runLater
                 versions.putAll(found)
-                refreshStyles()
+                failed += broken
+                val waiting = selected
                 // 正在等的那一行，结果回来是空的就退回原版
-                if (selected != LoaderKind.VANILLA && versions[selected]?.isEmpty() == true) {
-                    select(LoaderKind.VANILLA)
+                if (waiting != null && versions[waiting]?.isEmpty() == true) {
+                    selected = null
+                    choice = null
                 }
+                refreshUi()
             }
         }.apply { isDaemon = true; name = "loader-check" }.start()
     }
 
     private fun onLoaderVersion(value: LoaderVersion?, kind: LoaderKind) {
         if (filling || value == null) return
-        val entry = current ?: return
         if (kind != selected) return
+        val entry = current ?: return
         choice = LoaderSource.choice(kind, entry.id, value.id)
-        startButton.isDisable = false
+        refreshUi()
+    }
+
+    /** 按游戏版本查一次 API 列表，默认选最新那个。同一个版本查过就不再问。 */
+    private fun loadApi(mc: String) {
+        if (apiMc == mc && apiCombo.items.isNotEmpty()) return
+        apiGeneration++
+        val mine = apiGeneration
+        apiMc = mc
+        apiReady = false
+        apiCombo.items.clear()
+        apiCombo.value = null
+        refreshUi()
+
+        Thread {
+            val list = runCatching { FabricApi.versionsFor(mc) }.getOrDefault(emptyList())
+            Platform.runLater {
+                if (mine != apiGeneration) return@runLater
+                apiCombo.items.setAll(list)
+                apiCombo.value = list.firstOrNull()
+                apiReady = list.isNotEmpty()
+                refreshUi()
+            }
+        }.apply { isDaemon = true; name = "fabric-api-versions" }.start()
     }
 
     private companion object {
 
+        /** 顺序就是界面里的顺序：主流的放前面，被淘汰的 LiteLoader 放最后。 */
+        val LOADER_ORDER = listOf(
+            LoaderKind.FABRIC,
+            LoaderKind.QUILT,
+            LoaderKind.FORGE,
+            LoaderKind.NEOFORGE,
+            LoaderKind.OPTIFINE,
+            LoaderKind.LITELOADER
+        )
+
+        const val ROW_HEIGHT = 44.0
+        const val HINT_HEIGHT = 18.0
+        const val NAME_MAX = 64
+
+        /** 校验提示的红：比正红暗一点，摆在白底上不刺眼。 */
+        const val ERROR_TEXT = "#c0392b"
+
+        val ILLEGAL_CHARS = setOf('\\', '/', ':', '*', '?', '"', '<', '>', '|')
+
+        /** Windows 不允许的文件名，建目录会直接失败。 */
+        val RESERVED_NAMES = buildSet {
+            addAll(listOf("CON", "PRN", "AUX", "NUL"))
+            for (i in 1..9) {
+                add("COM$i")
+                add("LPT$i")
+            }
+        }
+
         const val BACK_STYLE =
             "-fx-background-color: #ffffff; -fx-border-color: #d4d4d8; -fx-border-width: 1;" +
-                    "-fx-border-radius: 8; -fx-background-radius: 8;" +
-                    "-fx-text-fill: #52525b; -fx-font-size: 13px; -fx-padding: 6 14 6 14;" +
+                    "-fx-border-radius: 8; -fx-background-radius: 8; -fx-padding: 0;" +
+                    "-fx-min-width: 36; -fx-pref-width: 36; -fx-max-width: 36;" +
+                    "-fx-min-height: 36; -fx-pref-height: 36; -fx-max-height: 36;" +
                     "-fx-cursor: hand;"
 
         /** 跟弹窗里那个「确定」同一套。 */
@@ -496,6 +629,10 @@ internal class VersionInstallView(
             "-fx-background-color: ${DownloadStyles.ACCENT_BG};" +
                     "-fx-border-color: ${DownloadStyles.ACCENT_LINE}; -fx-border-width: 1;" +
                     "-fx-border-radius: 8; -fx-background-radius: 8;"
+
+        const val ROW_HOVER =
+            "-fx-background-color: ${DownloadStyles.HOVER_BG}; -fx-border-color: #c9c9d1;" +
+                    "-fx-border-width: 1; -fx-border-radius: 8; -fx-background-radius: 8;"
 
         const val ROW_OFF =
             "-fx-background-color: #fbfbfc; -fx-border-color: #e8e8ee; -fx-border-width: 1;" +
