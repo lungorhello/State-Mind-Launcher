@@ -64,7 +64,11 @@ class DownloadPage(private val onOpenTasks: () -> Unit = {}) : Page {
         isVisible = false
     }
 
-    private val vanillaRoot = VBox(12.0, hero, list)
+    private val vanillaRoot = VBox(12.0, hero, list).apply {
+        // 列表吃掉 hero 之外的全部高度：不给 vgrow，它就按自己的 prefHeight 固定，
+        // 窗体拉高时下面留一大块空白，滚动条也不跟着走。
+        VBox.setVgrow(list, Priority.ALWAYS)
+    }
     private val content = StackPane(vanillaRoot, community, unavailable)
     private val stage = StackPane()
 
