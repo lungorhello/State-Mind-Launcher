@@ -192,7 +192,7 @@ class SettingPlayerPage : Page {
                 -fx-background-radius: 8;
             """ else """
                 -fx-background-color: $tint;
-                -fx-border-color: #cdb6f2;
+                -fx-border-color: #ded3f6;
                 -fx-border-width: 1;
                 -fx-border-radius: 8;
                 -fx-background-radius: 8;
