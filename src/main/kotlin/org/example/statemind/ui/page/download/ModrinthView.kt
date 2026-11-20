@@ -12,6 +12,7 @@ import javafx.scene.control.OverrunStyle
 import javafx.scene.control.ProgressIndicator
 import javafx.scene.control.ScrollPane
 import javafx.scene.control.TextField
+import javafx.scene.layout.FlowPane
 import javafx.scene.layout.HBox
 import javafx.scene.layout.Priority
 import javafx.scene.layout.Region
@@ -22,6 +23,8 @@ import javafx.util.StringConverter
 import org.example.statemind.core.McVersion
 import org.example.statemind.core.VersionEntry
 import org.example.statemind.core.VersionGroups
+import org.example.statemind.core.mod.McModNames
+import org.example.statemind.core.mod.ModCache
 import org.example.statemind.core.mod.ModKind
 import org.example.statemind.core.mod.Modrinth
 import org.example.statemind.ui.Typo
@@ -37,10 +40,14 @@ import org.example.statemind.ui.Typo
  *
  * 同一组条件的搜索结果缓存在内存里：来回切 tab 不该每次都重新问一遍服务器。
  */
-internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
+internal class ModrinthView(
+    private val gameDir: () -> File,
+    private val onDetail: (Boolean) -> Unit = {}
+) : StackPane() {
 
     private val versionBox = ComboBox<String>()
     private val loaderBox = ComboBox<String>()
+    private val categoryBox = ComboBox<String>()
     private val sortBox = ComboBox<Modrinth.Sort>()
 
     /** 一行说明：搜索失败、没有结果、版本名对不上。平常不占位。 */
@@ -93,10 +100,21 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
     /** 加载器那一列：资源包 / 光影不按加载器筛，整列收起。 */
     private val loaderCol: VBox = column("加载器", loaderBox, 150.0)
 
+    /** 分类那一列：选项跟着内容类型换（Modrinth 每个类型的分类词表都不一样）。 */
+    private val categoryCol: VBox = column("分类", categoryBox, 160.0)
+
     private val detail = ModDetailView({ showBrowse() }, gameDir)
 
     private var kind: ModKind = ModKind.MOD
     private var query = ""
+
+    /** 实际发给 Modrinth 的词。中文搜索时它是翻译过来的英文名。 */
+    private var term = ""
+    private var termFor = ""
+
+    /** 「钠 → Sodium」这类说明，挂在结果数后面。 */
+    private var translationNote = ""
+    private var translating = false
 
     /** 版本清单里全部正式版的版本号，新的在前。换内容类型时按下限重滤一遍。 */
     private var releases: List<String> = emptyList()
@@ -112,6 +130,9 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
     private var exhausted = false
     private var generation = 0
     private var inFlight: String? = null
+
+    /** 预取队列只跑一条：翻页时不该叠出好几条线程同时打接口。 */
+    private var prefetching = false
 
     private val hits = ArrayList<Modrinth.Hit>()
     private val cache = HashMap<String, Modrinth.SearchResult>()
@@ -156,6 +177,17 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
             buttonCell = optionCell { it }
             valueProperty().addListener { _, _, _ -> if (kind.filterByLoader) reload() }
         }
+        categoryBox.apply {
+            style = DownloadStyles.FIELD
+            maxWidth = Double.MAX_VALUE
+            visibleRowCount = 10
+            items.setAll(listOf(ALL_CATEGORIES))
+            value = ALL_CATEGORIES
+            // 值存 slug，显示用中文名
+            setCellFactory { optionCell { label -> if (label == ALL_CATEGORIES) label else ModCategories.zh(label) } }
+            buttonCell = optionCell { label -> if (label == ALL_CATEGORIES) label else ModCategories.zh(label) }
+            valueProperty().addListener { _, _, _ -> reload() }
+        }
         sortBox.apply {
             style = DownloadStyles.FIELD
             maxWidth = Double.MAX_VALUE
@@ -167,16 +199,16 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
             valueProperty().addListener { _, _, _ -> reload() }
         }
 
-        val cols = listOf(
-            column("游戏版本", versionBox, 240.0),
-            loaderCol,
-            column("排序", sortBox, 150.0)
-        )
-        cols.forEach { HBox.setHgrow(it, Priority.ALWAYS) }
-        val filterCard = HBox(12.0, *cols.toTypedArray()).apply {
-            alignment = Pos.CENTER_LEFT
+        // 四个筛选并排，窄了换到下一行 —— 硬挤会把下拉里的字压成一截省略号
+        val filterCard = FlowPane(12.0, 10.0).apply {
             padding = Insets(12.0)
             style = DownloadStyles.CARD
+            children.setAll(
+                column("游戏版本", versionBox, 240.0),
+                loaderCol,
+                categoryCol,
+                column("排序", sortBox, 150.0)
+            )
         }
 
         // 行是直接铺在卡片里的：没有 ListView 的虚拟化，整页滚起来才连贯
@@ -235,8 +267,14 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
         loaderCol.isVisible = kind.filterByLoader
         loaderCol.isManaged = kind.filterByLoader
         query = ""
+        term = ""
+        termFor = ""
+        translationNote = ""
         hint.text = ""
         filterHint.text = ""
+        // 分类词表跟着类型换；换完回到「全部分类」，别把模组的分类带去搜资源包
+        categoryBox.value = ALL_CATEGORIES
+        categoryBox.items.setAll(listOf(ALL_CATEGORIES) + ModCategories.choices(kind))
         rebuildVersionItems()
         showBrowse()
         reload()
@@ -246,6 +284,7 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
         val trimmed = text.trim()
         if (trimmed == query) return
         query = trimmed
+        translationNote = ""
         reload()
     }
 
@@ -352,16 +391,56 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
         detail.show(kind, hit, gameVersionOf())
         browse.isVisible = false
         detail.isVisible = true
+        // 详情页自己带着返回与标题，外层的类型栏与搜索框先让位
+        onDetail(true)
     }
 
     private fun showBrowse() {
         detail.isVisible = false
         browse.isVisible = true
+        onDetail(false)
     }
 
     // ---------- 搜索 ----------
 
     private fun reload() = load(reset = true)
+
+    /**
+     * 中文关键词先换成英文再搜。
+     *
+     * Modrinth 只认英文标题，PCL 能搜中文靠的是它自带的对照表；这里换成现查 MC 百科。
+     * 换不出来（或是纯英文）就照原样搜，至少不会比现在更差。
+     */
+    private fun resolveTerm(): String? {
+        if (!needsTranslation(query)) {
+            termFor = query
+            term = query
+            return term
+        }
+        if (termFor == query) return term
+        if (translating) return null
+
+        translating = true
+        setBusy(true)
+        busyLabel.text = "正在按中文名查找「$query」"
+        val wanted = query
+        Thread {
+            val english = runCatching { McModNames.englishOf(wanted) }.getOrNull()
+            Platform.runLater {
+                translating = false
+                // 这期间用户又改了词：这次的结果作废，让他自己那一轮去查
+                if (wanted != query) {
+                    reload()
+                    return@runLater
+                }
+                termFor = wanted
+                term = english ?: wanted
+                translationNote = if (english != null && english != wanted) "$wanted → $english" else ""
+                load(reset = true)
+            }
+        }.apply { isDaemon = true; name = "mcmod-search" }.start()
+        return null
+    }
 
     private fun load(reset: Boolean) {
         if (!reset && (loading || exhausted || offset >= total)) return
@@ -377,11 +456,13 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
             scroll.vvalue = 0.0
         }
 
+        val searchTerm = resolveTerm() ?: return
         val gameVersion = gameVersionOf()
         val loader = if (kind.filterByLoader) ModLoaders.valueOf(loaderBox.value) else null
+        val category = categoryBox.value?.takeIf { it != ALL_CATEGORIES }
         val sort = sortBox.value ?: Modrinth.Sort.RELEVANCE
         val from = offset
-        val key = "$kind|$query|$gameVersion|$loader|$sort|$from"
+        val key = "$kind|$searchTerm|$gameVersion|$loader|$category|$sort|$from"
 
         // 同一条件下已经有一份在跑：让它回来就是，别再发一份一模一样的
         if (key == inFlight) return
@@ -401,7 +482,9 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
         }
 
         Thread {
-            val outcome = runCatching { Modrinth.search(kind, query, gameVersion, loader, sort, from) }
+            val outcome = runCatching {
+                Modrinth.search(kind, searchTerm, gameVersion, loader, category, sort, from)
+            }
             Platform.runLater {
                 if (inFlight == key) inFlight = null
                 if (mine != generation) return@runLater
@@ -441,7 +524,13 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
             hits.isEmpty() -> "没有匹配的内容"
             else -> ""
         }
-        countLabel.text = if (total > 0) "共 $total 个结果" else ""
+        countLabel.text = buildString {
+            if (total > 0) append("共 $total 个结果")
+            if (translationNote.isNotBlank()) {
+                if (isNotEmpty()) append(" · ")
+                append("按译名搜索 ").append(translationNote)
+            }
+        }
 
         // 一屏还没铺满（大屏、或某个筛选下结果很少）就接着取，否则用户没得滑也就没有下一页
         if (added > 0 && hits.size < total) {
@@ -450,11 +539,36 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
                 if (viewport > 0 && scroll.content.layoutBounds.height <= viewport + 1) load(reset = false)
             }
         }
+        // 列表已经出来了，顺手把前几个项目的版本取回来 —— 点进详情页就是现成的
+        if (added > 0) prefetchTop()
     }
 
     private fun setBusy(on: Boolean) {
         busy.isVisible = on
         if (on) busyLabel.text = if (query.isBlank()) "正在加载" else "正在搜索「$query」"
+    }
+
+    /**
+     * 页面一铺好就在后台预取前几个项目的版本清单。
+     *
+     * 一条线程串着取、每条之间歇一下：几十个项目的版本一次并发打过去，既容易被限流，
+     * 也抢掉用户正在滚动时那一屏的带宽。已经取过的项目直接跳过。
+     */
+    private fun prefetchTop() {
+        if (prefetching) return
+        val targets = hits.take(PREFETCH).map { it.id }.filter { ModCache.versions(it) == null }
+        if (targets.isEmpty()) return
+        prefetching = true
+        Thread {
+            try {
+                for (id in targets) {
+                    runCatching { ModCache.prefetch(id) }
+                    runCatching { Thread.sleep(120) }
+                }
+            } finally {
+                prefetching = false
+            }
+        }.apply { isDaemon = true; name = "mod-prefetch" }.start()
     }
 
     // ---------- 渲染 ----------
@@ -466,10 +580,10 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
 
     private fun column(caption: String, control: Region, width: Double): VBox =
         VBox(4.0, Label(caption).apply { style = Typo.NOTE }, control).apply {
+            // 宽度写死：里面的下拉框跟着定宽，字才不会被压成省略号；放不下由外面换行
             prefWidth = width
-            maxWidth = Double.MAX_VALUE
-            // 窗口窄的时候列会被均分压缩；给个下限，别把里面的字压成一截省略号
-            minWidth = 110.0
+            minWidth = width
+            maxWidth = width
         }
 
     private fun <T> optionCell(render: (T) -> String): ListCell<T> = object : ListCell<T>() {
@@ -543,5 +657,12 @@ internal class ModrinthView(private val gameDir: () -> File) : StackPane() {
 
     private companion object {
         const val ALL_VERSIONS = "全部版本"
+        const val ALL_CATEGORIES = "全部分类"
+
+        /** 列表出来后预取几个项目的版本 —— 一屏能看见的那几个。 */
+        const val PREFETCH = 8
+
+        /** 含中日韩统一表意文字就是中文关键词，需要先换成英文。 */
+        fun needsTranslation(text: String): Boolean = text.any { it.code >= 0x2E80 }
     }
 }
