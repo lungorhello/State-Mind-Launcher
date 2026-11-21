@@ -24,6 +24,8 @@ import org.example.statemind.core.GameDirStore
 import org.example.statemind.core.InstanceScan
 import org.example.statemind.core.Prefs
 import org.example.statemind.core.RecycleBin
+import org.example.statemind.core.download.DownloadCenter
+import org.example.statemind.core.download.DownloadJob
 import org.example.statemind.ui.Dialogs
 import org.example.statemind.ui.NavIcons
 import org.example.statemind.ui.Page
@@ -87,10 +89,18 @@ class SettingInstancePage : Page {
             setOnAction { askDirectory() }
         }
         val viewLabel = Label("排列").apply { style = "-fx-font-size: 13px; -fx-text-fill: #555555;" }
+        // 兜底入口：切页时该刷的都会刷，但目录是在启动器外面被改的（别的启动器装了版本、
+        // 手动删了文件夹）时，用户需要一个能主动重扫的地方。
+        val refreshButton = iconButton(
+            icon = NavIcons.refresh(15.0, Color.web("#8b8b93")),
+            idle = Color.web("#8b8b93"),
+            hover = Color.web("#7c3aed"),
+            tip = "重新扫描"
+        ) { refresh() }
         val topBar = HBox(
             10.0, addButton,
             Region().apply { HBox.setHgrow(this, Priority.ALWAYS) },
-            viewLabel, modeBox
+            refreshButton, viewLabel, modeBox
         ).apply { alignment = Pos.CENTER_LEFT }
 
         modeBox.valueProperty().addListener { _, _, _ -> layoutGroups() }
@@ -152,9 +162,16 @@ class SettingInstancePage : Page {
         val nameBox = VBox(2.0, title, path).apply { minWidth = 0.0 }   // 窄窗口里能被压缩，长路径靠省略号
         HBox.setHgrow(nameBox, Priority.ALWAYS)
 
+        // 被别的版本继承的那份（原版材料）不摆出来：它不是玩家装的版本，点不动也装不了 mod。
+        // 但要留一句数量，否则「明明下了 26.3 却看不见」会像个 bug。
+        val visible = g.versions.filterNot { it.base }
+        val materialCount = g.versions.size - visible.size
         val note = Label(
-            if (g.type == GameDir.Type.EMPTY) g.type.label
-            else "${g.type.label} · ${g.versions.size} 个版本"
+            when {
+                g.type == GameDir.Type.EMPTY -> g.type.label
+                materialCount > 0 -> "${g.type.label} · ${visible.size} 个版本 · $materialCount 个原版材料"
+                else -> "${g.type.label} · ${visible.size} 个版本"
+            }
         ).apply { style = "-fx-font-size: 12px; -fx-text-fill: #9a9aa0;" }
         val header = HBox(10.0, nameBox, note, pinButton(g), folderButton(g)).apply { alignment = Pos.CENTER_LEFT }
         if (removable) {
@@ -166,7 +183,7 @@ class SettingInstancePage : Page {
 
         val cards = VBox(8.0)
         // 路径不在（目录被删/被搬走）时不留空话 —— 组标题上已经写着「路径不存在」了
-        fillCards(cards, g.versions, if (g.gameDir.isDirectory) "这个目录里还没有版本。" else "")
+        fillCards(cards, visible, if (g.gameDir.isDirectory) "这个目录里还没有版本。" else "")
 
         return VBox(10.0, header, cards).apply {
             padding = Insets(12.0)
@@ -213,8 +230,10 @@ class SettingInstancePage : Page {
             maxWidth = Double.MAX_VALUE
             prefWidth = 0.0        // 同组标题的路径：长版本名不能把「一行两个」那一行撑爆
         }
-        val desc = Label(v.description).apply {
-            style = "-fx-font-size: 12px; -fx-text-fill: #7c7c85;"
+        // 没下完的版本不能当正常版本看：启动会缺文件，装 mod 也只会落进一份废目录。
+        val desc = Label(if (v.incomplete) "${v.description} · 未完成" else v.description).apply {
+            style = "-fx-font-size: 12px; -fx-text-fill: " +
+                    (if (v.incomplete) "#C05050" else "#7c7c85") + ";"
             maxWidth = Double.MAX_VALUE
             prefWidth = 0.0
         }
@@ -241,7 +260,27 @@ class SettingInstancePage : Page {
             setOnAction { askDeleteVersion(v) }
         }
 
-        return HBox(11.0, versionIcon(v.loader), info, remove).apply {
+        // 这一份是下载中途失败的：任务还记着原始请求，就能原地补齐；
+        // 重启之后任务表空了，只剩删除这一条路（删了重下）。
+        val retryButton: Button? = if (v.incomplete) {
+            DownloadCenter.jobs.lastOrNull { job ->
+                job.state == DownloadJob.State.FAILED &&
+                        DownloadCenter.versionDirOf(job)?.absolutePath
+                            ?.equals(v.dir.absolutePath, ignoreCase = true) == true
+            }?.let { job ->
+                Button("重试").apply {
+                    style = BTN_GHOST_SMALL
+                    setOnAction { DownloadCenter.retry(job) }
+                }
+            }
+        } else {
+            null
+        }
+
+        val row = HBox(11.0, versionIcon(v.loader), info)
+        retryButton?.let { row.children += it }
+        row.children += remove
+        return row.apply {
             alignment = Pos.CENTER_LEFT
             padding = Insets(9.0, 12.0, 9.0, 12.0)
             minWidth = 0.0                    // 窄容器里能压缩，别把整行顶出去
