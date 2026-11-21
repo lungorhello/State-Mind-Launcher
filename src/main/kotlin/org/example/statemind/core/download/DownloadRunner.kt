@@ -228,6 +228,9 @@ internal object DownloadRunner {
      *
      * 同一批里的文件**并行**下（能一起下的就一起下）；本地已有且校验得过的
      * 直接计入进度，不重下。
+     *
+     * 有文件没下来时**原地重试一次**：网络抖动通常只影响一两个文件，整批判死太重。
+     * 重试只跑失败的那几份，成功的不会重下。
      */
     private fun downloadWave(
         board: Board,
@@ -255,9 +258,37 @@ internal object DownloadRunner {
             return
         }
 
+        var left = attempt(job, pending, limiter, threads)
+        if (left.isNotEmpty() && !job.isCancelled()) {
+            job.note = "重试 ${left.size} 个文件…"
+            DownloadCenter.notifyChanged()
+            left = attempt(job, left.map { it.run to it.item }, limiter, threads)
+        }
+
+        // 重试过还是下不动的才算失败 —— 这时才值得报原因
+        for (miss in left) {
+            failed.incrementAndGet()
+            board.noteFailure(miss.reason)
+            miss.run.failed(miss.reason.text)
+        }
+
+        runs.forEach { it.finishIfDone() }
+        DownloadCenter.notifyChanged()
+    }
+
+    /** 一批文件跑一遍，返回没下来的那些。 */
+    private fun attempt(
+        job: DownloadJob,
+        pending: List<Pair<Board.Run, DownloadItem>>,
+        limiter: RateLimiter,
+        threads: Int
+    ): List<Miss> {
+        val misses = java.util.Collections.synchronizedList(ArrayList<Miss>())
         val next = AtomicInteger(0)
         val latch = CountDownLatch(threads)
-        val pool = Executors.newFixedThreadPool(threads) { runnable -> Thread(runnable, "download").apply { isDaemon = true } }
+        val pool = Executors.newFixedThreadPool(threads) { runnable ->
+            Thread(runnable, "download").apply { isDaemon = true }
+        }
 
         repeat(threads) {
             pool.execute {
@@ -276,10 +307,7 @@ internal object DownloadRunner {
                         } catch (_: CancelledException) {
                             break
                         } catch (e: Exception) {
-                            failed.incrementAndGet()
-                            val reason = FailureText.of(e)
-                            board.noteFailure(reason)
-                            run.failed(reason.text)
+                            misses += Miss(run, item, FailureText.of(e))
                         }
                     }
                 } finally {
@@ -290,9 +318,11 @@ internal object DownloadRunner {
         pool.shutdown()
         latch.await()
         runCatching { pool.awaitTermination(30, TimeUnit.SECONDS) }
-        runs.forEach { it.finishIfDone() }
-        DownloadCenter.notifyChanged()
+        return misses.toList()
     }
+
+    /** 一次没下来的文件，连同它属于哪一段、为什么没下来。 */
+    private class Miss(val run: Board.Run, val item: DownloadItem, val reason: FailureText.Reason)
 
     /** 跑这一段里的本地安装步骤（安装器、补丁器）。 */
     private fun runSteps(job: DownloadJob, run: Board.Run, steps: List<InstallStep>) {
