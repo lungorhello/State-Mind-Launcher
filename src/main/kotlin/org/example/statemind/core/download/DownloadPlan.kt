@@ -131,8 +131,9 @@ object DownloadPlanner {
      * 落点是**版本隔离**目录：游戏本体进 `versions/<id>/`，共享的 `libraries/` 与 `assets/` 进游戏目录根。
      *
      * [targetId] 是这次装出来的版本名（安装页上可以改）。落成几个文件夹看 [GameDir.installShapeOf]：
-     * 共享形态下原版的 json 与客户端 jar 落在 `versions/<entry.id>/`，加载器版本靠 `inheritsFrom`
-     * 回来找；自包含形态下所有文件都进 `versions/<targetId>/`，不另建原版目录。
+     * 共享形态下原版的材料落在 `versions/<版本号>-resources/`（见 [GameDir.SharedVanilla]），
+     * 加载器版本靠 `inheritsFrom` 回来找；自包含形态下所有文件都进 `versions/<targetId>/`，
+     * 不另建原版目录。
      */
     fun plan(
         entry: VersionEntry,
@@ -143,17 +144,18 @@ object DownloadPlanner {
         fabricApiVersionId: String? = null,
         onNote: (String) -> Unit = {}
     ): DownloadPlan {
-        val vanillaDir = File(root, "versions/${entry.id}")
         val versionDir = File(root, "versions/$targetId")
-        val renamed = targetId != entry.id
         // 内置目录与 multi 系共享原版，其余传统目录装成自包含（一个文件夹一个完整版本）
         val selfContained = GameDir.installShapeOf(root) == GameDir.InstallShape.SELF_CONTAINED
+        // 只有装加载器才需要共享材料。单下原版时它自己就是一份能玩的版本，再摆一份材料目录
+        // 只会让人分不清哪个该点。
+        // 已有材料就沿用（含老布局 versions/<版本号>/），没有才按 -resources 新命名建。
+        val shared = if (selfContained || loader == null) null else GameDir.SharedVanilla.of(root, entry.id)
         val libDir = File(root, "libraries")
         val assetsDir = File(root, "assets")
 
         // 同一个目标路径只留一条：库表里偶有重复条目，重复下没意义
         val seen = HashSet<String>()
-        val versionFiles = ArrayList<DownloadItem>()
         val clientFiles = ArrayList<DownloadItem>()
         val libFiles = ArrayList<DownloadItem>()
         val assetFiles = ArrayList<DownloadItem>()
@@ -212,25 +214,16 @@ object DownloadPlanner {
         val versionText = fetchText(entry.url, source)
         val json = MiniJson.parse(versionText) as? Map<*, *>
             ?: throw IOException("版本文件不是 JSON 对象")
+        // 共享材料由我们自己写盘，不走下载：官方 json 里的 `id` 是版本号，跟 `-resources`
+        // 这个目录名对不上，PCL 认 id 与目录名一致，会把它判成错误版本。已有的那份不动。
+        if (shared != null && !shared.json.isFile) {
+            shared.dir.mkdirs()
+            shared.json.writeText(withId(versionText, shared.id), Charsets.UTF_8)
+        }
         if (loader == null) {
-            if (selfContained) {
-                // 官方 json 本身就是全量，按新名字直接写进版本目录：不必再存一份原版
-                versionDir.mkdirs()
-                File(versionDir, "$targetId.json").writeText(withId(versionText, targetId), Charsets.UTF_8)
-            } else {
-                add(File(vanillaDir, "${entry.id}.json"), entry.url, entry.size, entry.sha1, versionFiles)
-
-                // 原版改了名：新目录里补一份 json，`jar` 指回原版那份 —— 客户端本体不必再下一遍。
-                // id 也要跟着改成新名字：PCL 认 id 与目录名一致，对不上就判成错误版本。
-                if (renamed) {
-                    versionDir.mkdirs()
-                    File(versionDir, "$targetId.json")
-                        .writeText(withId(withJar(versionText, entry.id), targetId), Charsets.UTF_8)
-                }
-            }
-        } else if (!selfContained) {
-            // 加载器版本的 json 是薄壳，父版本那份必须落地才有得继承
-            add(File(vanillaDir, "${entry.id}.json"), entry.url, entry.size, entry.sha1, versionFiles)
+            // 单下原版：官方 json 本身就是全量，换个 id 直接写进自己的目录，jar 也下在这儿
+            versionDir.mkdirs()
+            File(versionDir, "$targetId.json").writeText(withId(versionText, targetId), Charsets.UTF_8)
         }
 
         // ① 客户端本体
@@ -238,7 +231,8 @@ object DownloadPlanner {
         val client = downloads?.get("client") as? Map<*, *>
         if (client != null) {
             add(
-                if (selfContained) File(versionDir, "$targetId.jar") else File(vanillaDir, "${entry.id}.jar"),
+                // 共享形态落在材料目录里；已有且校验得过的会被跳过，不会重复下
+                shared?.jar ?: File(versionDir, "$targetId.jar"),
                 client["url"] as? String,
                 number(client["size"]),
                 client["sha1"] as? String,
@@ -307,7 +301,10 @@ object DownloadPlanner {
 
         // ⑤ 加载器
         val loaderPlan = loader?.let {
-            buildLoaderPlan(it, entry, root, source, json, targetId, versionDir, libDir, selfContained, onNote)
+            buildLoaderPlan(
+                it, entry, root, source, json, targetId, versionDir, libDir,
+                selfContained, shared, onNote
+            )
         }
 
         // ⑥ 跟着版本一起装的前置（Fabric API）。它下在版本自己的 mods/ 里，不进游戏根目录
@@ -317,7 +314,6 @@ object DownloadPlanner {
         }
 
         val vanilla = ArrayList<DownloadStage>()
-        if (versionFiles.isNotEmpty()) vanilla += DownloadStage(DownloadStages.VANILLA_VERSION, versionFiles)
         if (clientFiles.isNotEmpty()) vanilla += DownloadStage(DownloadStages.VANILLA_CLIENT, clientFiles)
         if (libFiles.isNotEmpty()) vanilla += DownloadStage(DownloadStages.VANILLA_LIBS, libFiles)
         if (assetFiles.isNotEmpty()) vanilla += DownloadStage(DownloadStages.VANILLA_ASSETS, assetFiles)
@@ -353,9 +349,12 @@ object DownloadPlanner {
         versionDir: File,
         libDir: File,
         selfContained: Boolean,
+        shared: GameDir.SharedVanilla.Shared?,
         onNote: (String) -> Unit
     ): LoaderPlan {
         val label = loader.kind.label
+        // 安装器按路径找客户端本体：共享形态在材料目录里，自包含形态在自己目录里
+        val clientJar = shared?.jar ?: File(versionDir, "$targetId.jar")
         return when (loader.kind) {
             LoaderKind.FORGE, LoaderKind.NEOFORGE -> {
                 val installer = installerItem(loader, source, root)
@@ -369,11 +368,12 @@ object DownloadPlanner {
                         targetId = targetId,
                         requiredJava = InstallJava.requiredMajor(json),
                         mavenRoot = ForgeSource.mavenRoot(loader.kind),
-                        vanilla = json
+                        vanilla = json,
+                        vanillaJar = clientJar
                     )
                     versionDir.mkdirs()
                     File(versionDir, "$targetId.json")
-                        .writeText(versionJsonText(prepared.versionText, targetId, json, selfContained), Charsets.UTF_8)
+                        .writeText(versionJsonText(prepared.versionText, targetId, json, selfContained, shared?.id), Charsets.UTF_8)
 
                     val libItems = ArrayList<DownloadItem>()
                     val miss = ArrayList<String>()
@@ -428,11 +428,12 @@ object DownloadPlanner {
                         loaderVersion = loader.loaderVersion,
                         targetId = targetId,
                         vanilla = json,
-                        requiredJava = InstallJava.requiredMajor(json)
+                        requiredJava = InstallJava.requiredMajor(json),
+                        vanillaJar = clientJar
                     )
                     versionDir.mkdirs()
                     File(versionDir, "$targetId.json")
-                        .writeText(versionJsonText(prepared.versionText, targetId, json, selfContained), Charsets.UTF_8)
+                        .writeText(versionJsonText(prepared.versionText, targetId, json, selfContained, shared?.id), Charsets.UTF_8)
 
                     val libItems = ArrayList<DownloadItem>()
                     val miss = ArrayList<String>()
@@ -486,7 +487,7 @@ object DownloadPlanner {
                 // 跟用户改过的名字（`26.3-Fabric 0.20.1`）对不上。PCL 认 id 与目录名一致，
                 // 对不上就把这个版本判成错误版本，还会自己补一个出来 —— 同一份游戏目录里两个版本。
                 File(versionDir, "$targetId.json")
-                    .writeText(versionJsonText(profileText, targetId, json, selfContained), Charsets.UTF_8)
+                    .writeText(versionJsonText(profileText, targetId, json, selfContained, shared?.id), Charsets.UTF_8)
                 val profile = MiniJson.parse(profileText) as? Map<*, *>
                     ?: throw IOException("加载器配置不是 JSON 对象")
                 val loaderLibs = (profile["libraries"] as? List<*>)
@@ -591,21 +592,6 @@ object DownloadPlanner {
     }
 
     /**
-     * 给原版 json 补一个 `jar` 字段，指向原版目录里的客户端本体。
-     *
-     * 版本改了名之后，`versions/<新名>/<新名>.jar` 是不存在的；`VersionJson.load` 认这个字段，
-     * 于是能顺着它找回 `versions/<版本号>/<版本号>.jar`，不用把 41 MB 复制一份。
-     * 键序在 json 里没有意义，直接插在开头最省事，也不碰正文里的任何字符。
-     */
-    private fun withJar(text: String, jar: String): String {
-        if (text.contains("\"jar\"")) return text
-        val brace = text.indexOf('{')
-        if (brace < 0) return text
-        val safe = jar.replace("\\", "\\\\").replace("\"", "\\\"")
-        return text.substring(0, brace + 1) + "\"jar\": \"$safe\"," + text.substring(brace + 1)
-    }
-
-    /**
      * 把加载器 profile json 里的 `id` 换成这次装出来的版本名。
      *
      * 官方 profile json 的 id 是 `fabric-loader-0.20.1-26.3` 这种形状，跟目录名
@@ -625,17 +611,39 @@ object DownloadPlanner {
         loaderText: String,
         targetId: String,
         parent: Map<*, *>,
-        selfContained: Boolean
+        selfContained: Boolean,
+        parentId: String?
     ): String {
-        if (!selfContained) return withId(loaderText, targetId)
+        if (!selfContained) {
+            // 共享形态：id 换成目录名，inheritsFrom 指向材料目录（新命名是 `<版本号>-resources`）
+            val renamed = withId(loaderText, targetId)
+            return parentId?.let { withParent(renamed, it) } ?: renamed
+        }
         val child = MiniJson.parse(loaderText) as? Map<*, *> ?: return withId(loaderText, targetId)
         val flat = LinkedHashMap<String, Any?>(VersionJson.merge(listOf(child, parent)))
         flat["id"] = targetId
         return MiniJson.write(flat)
     }
 
-    private fun withId(text: String, id: String): String {
-        val key = "\"id\""
+    private fun withId(text: String, id: String): String = withString(text, "\"id\"", id)
+
+    /**
+     * 改 `inheritsFrom` 的指向。
+     *
+     * 共享材料目录现在叫 `<版本号>-resources`，而官方 profile 和各家安装器写出来的还是 `<版本号>`。
+     * 不改的话加载器版本指到一个不存在的目录 —— 我们起不来，PCL 还会判「缺少 xxx」并自己补一份。
+     */
+    private fun withParent(text: String, parentId: String): String {
+        if (text.contains("\"inheritsFrom\"")) return withString(text, "\"inheritsFrom\"", parentId)
+
+        // 没有这个字段就补在开头：加载器版本必须有父版本，缺了就是个不知道从哪拿原版材料的空壳
+        val brace = text.indexOf('{')
+        if (brace < 0) return text
+        val safe = parentId.replace("\\", "\\\\").replace("\"", "\\\"")
+        return text.substring(0, brace + 1) + "\"inheritsFrom\": \"$safe\"," + text.substring(brace + 1)
+    }
+
+    private fun withString(text: String, key: String, value: String): String {
         val at = text.indexOf(key)
         if (at < 0) return text
         val colon = text.indexOf(':', at + key.length)
@@ -645,8 +653,8 @@ object DownloadPlanner {
         if (i >= text.length || text[i] != '"') return text
         val end = text.indexOf('"', i + 1)
         if (end < 0) return text
-        val safe = id.replace("\\", "\\\\").replace("\"", "\\\"")
-        // 切在引号内侧：i 是开引号、end 是闭引号，两边都要留着，否则 id 变成裸字面量 26.3-Fabric，
+        val safe = value.replace("\\", "\\\\").replace("\"", "\\\"")
+        // 切在引号内侧：i 是开引号、end 是闭引号，两边都要留着，否则值变成裸字面量，
         // 解析到第一个 '-' 就报「期望 '.' 或 '}'」。
         return text.substring(0, i + 1) + safe + text.substring(end)
     }
