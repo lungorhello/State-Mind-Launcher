@@ -35,7 +35,9 @@ internal object OptiFineInstall {
         loaderVersion: String,
         targetId: String,
         vanilla: Map<*, *>,
-        requiredJava: Int?
+        requiredJava: Int?,
+        /** 客户端本体在哪：共享形态下它不在 `versions/<版本号>/<版本号>.jar`。 */
+        vanillaJar: File? = null
     ): Prepared {
         val mavenVersion = "${mcVersion}_$loaderVersion"
         val outRel = "optifine/OptiFine/$mavenVersion/OptiFine-$mavenVersion.jar"
@@ -78,7 +80,7 @@ internal object OptiFineInstall {
 
         val step = PatchStep(
             installer = installer,
-            mcJar = File(root, "versions/$mcVersion/$mcVersion.jar"),
+            mcJar = vanillaJar ?: File(root, "versions/$mcVersion/$mcVersion.jar"),
             outJar = File(root, "libraries/$outRel"),
             hasPatcher = hasPatcher,
             wrapperEntry = wrapper?.entry,
