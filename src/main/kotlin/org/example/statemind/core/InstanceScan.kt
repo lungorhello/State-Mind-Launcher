@@ -182,16 +182,17 @@ object InstanceScan {
     }
 
     private fun mcVersionOf(root: Map<*, *>?, id: String): String {
+        // `26.3-resources` 是共享材料目录的名字，界面上要显示的游戏版本还是 `26.3`
         val inherits = root?.get("inheritsFrom") as? String
-        if (!inherits.isNullOrBlank()) return inherits
+        if (!inherits.isNullOrBlank()) return GameDir.SharedVanilla.stripSuffix(inherits)
 
         val client = root?.get("clientVersion") as? String
         if (!client.isNullOrBlank()) return client
 
         val jar = root?.get("jar") as? String
-        if (!jar.isNullOrBlank() && jar != id) return jar
+        if (!jar.isNullOrBlank() && jar != id) return GameDir.SharedVanilla.stripSuffix(jar)
 
-        return guessMc(id)
+        return guessMc(GameDir.SharedVanilla.stripSuffix(id))
     }
 
     /**
