@@ -15,6 +15,7 @@ import javafx.util.StringConverter
 import org.example.statemind.core.BackendUtil.JavaInfo
 import org.example.statemind.core.JavaStore
 import org.example.statemind.core.LaunchSelection
+import org.example.statemind.core.Prefs
 import org.example.statemind.ui.Page
 import org.example.statemind.ui.Typo
 import org.example.statemind.ui.helpMark
@@ -142,7 +143,34 @@ class SettingLaunchPage : Page {
             """
         }
 
-        val root = VBox(14.0, heading, card).apply { padding = Insets(20.0) }
+        // ── 版本列表：共享原版材料要不要摆出来 ────────────────────────────
+        val listHeading = Label("版本列表").apply { style = Typo.HEADING }
+        val baseTitle = Label("显示共享原版文件").apply { style = Typo.LABEL }
+        val baseToggle = ToggleSwitch().apply {
+            style = "-color-accent-emphasis: $ACCENT_SOFT;"
+            isSelected = Prefs.showBaseVersions
+            selectedProperty().addListener { _, _, now -> Prefs.showBaseVersions = now }
+        }
+        val baseRow = HBox(
+            10.0,
+            baseTitle,
+            helpMark("被加载器版本继承的那份原版。文件由多个版本共用，列出来只是方便查看。"),
+            Region().apply { HBox.setHgrow(this, Priority.ALWAYS) },
+            baseToggle
+        ).apply { alignment = Pos.CENTER_LEFT }
+
+        val listCard = VBox(baseRow).apply {
+            padding = Insets(14.0)
+            style = """
+                -fx-background-color: #ffffff;
+                -fx-border-color: #d9d9de;
+                -fx-border-width: 1;
+                -fx-border-radius: 10;
+                -fx-background-radius: 10;
+            """
+        }
+
+        val root = VBox(14.0, heading, card, listHeading, listCard).apply { padding = Insets(20.0) }
 
         if (!wired) {
             wired = true
