@@ -75,6 +75,42 @@ object GameDir {
      */
     fun migrateShape(gameDir: File, versionId: String): Boolean = false
 
+    /**
+     * 共享原版材料的落点：`versions/<版本号>-resources/`。
+     *
+     * 后缀是给人看的 —— 这份目录里有 json 有 jar，长得跟一个能启动的原版版本一模一样，
+     * 但它只是给加载器版本提供材料，不是玩家装的版本。名字里带上 `-resources` 就不会被误认。
+     *
+     * 老布局 `versions/<版本号>/` 仍然认：那里已经有完整材料时直接沿用（锁定），
+     * 不再按新名字建一份 —— 同一份游戏版本只该有一套共享材料。
+     */
+    object SharedVanilla {
+
+        const val SUFFIX = "-resources"
+
+        /** [dir] 是材料目录，[id] 是它的文件夹名（老布局时等于版本号本身）。 */
+        data class Shared(val dir: File, val id: String) {
+            val json: File get() = File(dir, "$id.json")
+            val jar: File get() = File(dir, "$id.jar")
+        }
+
+        /** 已有的优先：先看新命名，再看老命名里那份完整的，都没有就按新命名给一个。 */
+        fun of(root: File, mcVersion: String): Shared {
+            val versions = File(root, "versions")
+            val fresh = File(versions, "$mcVersion$SUFFIX")
+            if (fresh.isDirectory) return Shared(fresh, "$mcVersion$SUFFIX")
+
+            val legacy = File(versions, mcVersion)
+            if (File(legacy, "$mcVersion.json").isFile) return Shared(legacy, mcVersion)
+
+            return Shared(fresh, "$mcVersion$SUFFIX")
+        }
+
+        /** 把 `26.3-resources` 还原成 `26.3`：界面上要显示的是游戏版本，不是材料目录名。 */
+        fun stripSuffix(text: String): String =
+            if (text.endsWith(SUFFIX)) text.removeSuffix(SUFFIX) else text
+    }
+
     /** root 可以是游戏目录本身、multi 系根目录，或某个 multi 系实例目录。 */
     fun analyze(root: File): Analysis {
         val files = root.listFiles()
