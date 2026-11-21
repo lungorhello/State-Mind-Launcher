@@ -573,6 +573,8 @@ class App : Application() {
      * 那是他定的名字，改掉反而认不出来。
      */
     private fun displayName(v: InstanceScan.Version): String {
+        // 共享材料目录的名字是 `26.3-resources`，下拉里要的是游戏版本本身
+        if (v.base) return v.mcVersion
         val autoPrefix = v.loader.label.lowercase() + "-loader-"
         return if (v.id.startsWith(autoPrefix)) "${v.loader.label} ${v.mcVersion}" else v.id
     }
