@@ -125,7 +125,11 @@ object DownloadCenter {
     private val list = CopyOnWriteArrayList<DownloadJob>()
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
     private val finishers = CopyOnWriteArrayList<(DownloadJob) -> Unit>()
+    private val failers = CopyOnWriteArrayList<(DownloadJob) -> Unit>()
     private val queue = LinkedBlockingQueue<Request>()
+
+    /** 每个任务当初的请求。失败后「重新下载」要靠它复现同一份计划，版本目录也由它定位。 */
+    private val requests = java.util.concurrent.ConcurrentHashMap<Long, Request>()
     private val counter = AtomicLong(0)
 
     @Volatile
@@ -159,16 +163,36 @@ object DownloadCenter {
     ): DownloadJob {
         val versionId = name.trim().ifBlank { loader?.id ?: entry.id }
         val job = DownloadJob(counter.incrementAndGet(), versionId)
+        val request = Request(job, entry, root, source, loader, fabricApiVersionId)
         list += job
-        queue += Request(job, entry, root, source, loader, fabricApiVersionId)
+        requests[job.id] = request
+        queue += request
         startWorker()
         notifyChanged()
         return job
     }
 
+    /**
+     * 按原样再跑一遍失败的任务。
+     *
+     * 已下好的文件会过 `usable` 校验被跳过，所以这不是「从头重下」，是「补齐缺的那几份」。
+     * 版本名沿用原来那个 —— 换名字会留下两份互不相干的半成品。
+     */
+    fun retry(job: DownloadJob): DownloadJob? {
+        val old = requests[job.id] ?: return null
+        return submit(old.entry, old.root, old.source, old.loader, job.versionId, old.fabricApiVersionId)
+    }
+
+    /** 这个任务的版本目录（`<root>/versions/<名>`）。用来算目录大小、删除半成品。 */
+    fun versionDirOf(job: DownloadJob): File? =
+        requests[job.id]?.let { File(it.root, "versions/${job.versionId}") }
+
     /** 只清已经结束的；正在跑的留着。 */
     fun clearFinished() {
-        list.removeAll { it.finished }
+        list.removeAll { job ->
+            if (job.finished) requests.remove(job.id)
+            job.finished
+        }
         notifyChanged()
     }
 
@@ -189,6 +213,20 @@ object DownloadCenter {
 
     internal fun notifyFinished(job: DownloadJob) {
         finishers.forEach { it(job) }
+    }
+
+    /**
+     * 任务终态为失败时回调一次。
+     *
+     * 界面据此**主动**弹出原因，而不是等人去点任务页上的「查看详情」——
+     * 下到一半失败时人可能已经切到别的页面了。
+     */
+    fun onJobFailed(listener: (DownloadJob) -> Unit) {
+        failers += listener
+    }
+
+    internal fun notifyFailed(job: DownloadJob) {
+        failers.forEach { it(job) }
     }
 
     internal fun notifyChanged() {
@@ -218,6 +256,8 @@ object DownloadCenter {
                             request.job.note = "已中断"
                             notifyChanged()
                         }
+                    // 正常收尾和上面这条异常路径都可能以失败结束，统一在这里报一次
+                    if (request.job.state == DownloadJob.State.FAILED) notifyFailed(request.job)
                 }
             }, "download-queue").apply { isDaemon = true; start() }
         }
