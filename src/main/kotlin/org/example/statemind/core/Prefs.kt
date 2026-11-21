@@ -29,6 +29,14 @@ object Prefs {
         get() = readFlag(KEY_AUTO_JAVA, true)
         set(value) = writeFlag(KEY_AUTO_JAVA, value)
 
+    /**
+     * 实例页是否列出「共享原版材料」—— 被加载器版本 `inheritsFrom` 指回去的那份原版。
+     * 默认不列：它不是玩家装的版本，点进去只会绕过加载器。默认关，需要时自己打开。
+     */
+    var showBaseVersions: Boolean
+        get() = readFlag(KEY_SHOW_BASE, false)
+        set(value) = writeFlag(KEY_SHOW_BASE, value)
+
     var javaHome: String
         get() = props.getProperty(KEY_JAVA_HOME).orEmpty()
         set(value) {
@@ -145,6 +153,7 @@ object Prefs {
     private const val KEY_RESOURCE_DIR = "download.resourceDir"
     private const val KEY_RESOURCE_NAMING = "download.resourceNaming"
     private const val KEY_DOWNLOAD_DIR = "download.dir"
+    private const val KEY_SHOW_BASE = "instance.showBase"
 
     /** 「无限制」时的实际线程上限：再高只会把磁盘和网络排队排死。 */
     const val THREADS_MAX = 64
