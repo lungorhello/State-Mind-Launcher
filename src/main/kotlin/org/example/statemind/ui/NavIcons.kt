@@ -178,6 +178,13 @@ internal object NavIcons {
         strokeWidth = 2.0
     )
 
+    /** refresh（顺时针箭头）：描边型，实例页的重扫按钮用它。 */
+    private val REFRESH = Data(
+        "M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8M21 3v5h-5",
+        3.0, 3.0, 18.0, 18.0,
+        strokeWidth = 2.0
+    )
+
     /** 返回箭头，[size] 是见方边长。 */
     fun back(size: Double, color: Color): Icon = render(BACK, size, color)
 
@@ -204,6 +211,9 @@ internal object NavIcons {
 
     /** 文件夹，[size] 是见方边长。 */
     fun folder(size: Double, color: Color): Icon = render(FOLDER, size, color)
+
+    /** 刷新（顺时针箭头），[size] 是见方边长。 */
+    fun refresh(size: Double, color: Color): Icon = render(REFRESH, size, color)
 
     /** 下载量用的箭头（跟标题栏那个下载入口同一条路径）。 */
     fun download(size: Double, color: Color): Icon = render(TASK, size, color)
