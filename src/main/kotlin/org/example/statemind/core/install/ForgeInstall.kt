@@ -33,6 +33,8 @@ internal object ForgeInstall {
      * 用官方安装器装 Forge / NeoForge。
      *
      * @param vanilla 原版版本 json（用来取 mojmap 的下载地址，装配器自己那份连不上 Mojang）
+     * @param vanillaJar 客户端本体在哪。共享形态下它不叫 `versions/<版本号>/<版本号>.jar`，
+     *   processor 得拿到真实路径，否则装到一半报找不到客户端。
      */
     fun prepare(
         installer: File,
@@ -41,7 +43,8 @@ internal object ForgeInstall {
         targetId: String,
         requiredJava: Int?,
         mavenRoot: String,
-        vanilla: Map<*, *>
+        vanilla: Map<*, *>,
+        vanillaJar: File? = null
     ): Prepared {
         ZipFile(installer).use { zip ->
             val profile = readText(zip, "install_profile.json")?.let { MiniJson.parse(it) as? Map<*, *> }
@@ -52,7 +55,10 @@ internal object ForgeInstall {
             val local = copyMaven(zip, File(root, "libraries"))
 
             return if (profile.containsKey("json")) {
-                modern(zip, profile, installer, root, mcVersion, targetId, requiredJava, mavenRoot, vanilla, local)
+                modern(
+                    zip, profile, installer, root, mcVersion, targetId, requiredJava,
+                    mavenRoot, vanilla, local, vanillaJar
+                )
             } else {
                 legacy(zip, profile, root, mcVersion, targetId, mavenRoot, local)
             }
@@ -71,7 +77,8 @@ internal object ForgeInstall {
         requiredJava: Int?,
         mavenRoot: String,
         vanilla: Map<*, *>,
-        local: Set<String>
+        local: Set<String>,
+        vanillaJar: File?
     ): Prepared {
         val jsonPath = (profile["json"] as? String)?.trimStart('/')
             ?: throw IOException("安装器没写版本 json 的路径")
@@ -109,7 +116,7 @@ internal object ForgeInstall {
                 installer = installer,
                 root = root,
                 libDir = File(root, "libraries"),
-                mcJar = File(root, "versions/$mcVersion/$mcVersion.jar"),
+                mcJar = vanillaJar ?: File(root, "versions/$mcVersion/$mcVersion.jar"),
                 mcVersion = mcVersion,
                 requiredJava = requiredJava
             )
