@@ -17,6 +17,7 @@ import org.example.statemind.core.BackendUtil.JavaInfo
 import org.example.statemind.core.Account
 import org.example.statemind.core.AccountStore
 import org.example.statemind.core.download.DownloadCenter
+import org.example.statemind.core.download.DownloadJob
 import org.example.statemind.core.auth.LaunchAuth
 import org.example.statemind.core.JavaStore
 import org.example.statemind.core.LaunchUtil
@@ -25,6 +26,7 @@ import org.example.statemind.core.GameDirStore
 import org.example.statemind.core.InstanceScan
 import org.example.statemind.core.LaunchSelection
 import org.example.statemind.core.LaunchTarget
+import org.example.statemind.core.RecycleBin
 import org.example.statemind.ui.Dialogs
 import org.example.statemind.ui.NavBar
 import org.example.statemind.ui.Page
@@ -263,6 +265,42 @@ class App : Application() {
                 rescan(first = false)
             }
         }
+
+        // 失败时主动弹出来：这时人可能已经切到别的页，只把红色写在任务页里等于没提示。
+        // 半成品目录留着不删 —— 补齐比重下省事，删不删由用户决定。
+        DownloadCenter.onJobFailed { job ->
+            Platform.runLater { showDownloadFailure(job) }
+        }
+    }
+
+    /**
+     * 下载失败：把原因摆到眼前，给「重新下载」和「删除版本」两条路。
+     *
+     * 重新下载沿用原请求（同名、同目录），已下好的文件会被校验跳过 —— 实际是补齐缺的那几份。
+     * 删除走回收站，可以还原。
+     */
+    private fun showDownloadFailure(job: DownloadJob) {
+        val body = buildString {
+            append(job.mainReason.ifBlank { "下载过程中出现问题" })
+            if (job.message.isNotBlank()) {
+                append('\n')
+                append(job.message)
+            }
+            append("\n版本目录：versions/").append(job.versionId)
+        }
+        Dialogs.confirm(
+            title = "下载失败",
+            body = body,
+            kind = Dialogs.Kind.ERROR,
+            confirmText = "重新下载",
+            cancelText = "稍后",
+            extraAction = "删除版本" to {
+                val dir = DownloadCenter.versionDirOf(job)
+                if (dir != null && !RecycleBin.moveToTrash(dir)) {
+                    Dialogs.error("删除失败", "文件正在被占用，或系统不允许移到回收站。")
+                }
+            }
+        ) { DownloadCenter.retry(job) }
     }
 
     /**
@@ -509,7 +547,9 @@ class App : Application() {
      * 实例页仍然看得到它（带「未完成」标记），那里是管理界面，不是启动入口。
      */
     private fun choicesOf(dirs: List<InstanceScan.Directory>): List<Choice> {
-        val flat = dirs.flatMap { d -> d.versions.filterNot { it.incomplete }.map { d to it } }
+        // 不完整的不列；被别的版本继承的原版材料也不列 —— 它不是玩家装的版本，
+        // 选它启动等于绕过加载器，装 mod 也会落到那份共享目录里。
+        val flat = dirs.flatMap { d -> d.versions.filterNot { it.incomplete || it.base }.map { d to it } }
         val repeated = flat.groupingBy { it.second.id }.eachCount().filterValues { it > 1 }.keys
         return flat.map { (d, v) ->
             val name = displayName(v)
