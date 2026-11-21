@@ -162,15 +162,17 @@ class SettingInstancePage : Page {
         val nameBox = VBox(2.0, title, path).apply { minWidth = 0.0 }   // 窄窗口里能被压缩，长路径靠省略号
         HBox.setHgrow(nameBox, Priority.ALWAYS)
 
-        // 被别的版本继承的那份（原版材料）不摆出来：它不是玩家装的版本，点不动也装不了 mod。
-        // 但要留一句数量，否则「明明下了 26.3 却看不见」会像个 bug。
-        val visible = g.versions.filterNot { it.base }
-        val materialCount = g.versions.size - visible.size
+        // 被别的版本继承的那份（原版材料）默认不摆出来：它不是玩家装的版本，点进去只会绕过加载器。
+        // 但要留一句数量，否则「明明下了 26.3 却看不见」会像个 bug。要不要列由「设置 · 启动」的开关定。
+        val showBase = Prefs.showBaseVersions
+        val visible = if (showBase) g.versions else g.versions.filterNot { it.base }
+        val materialCount = g.versions.count { it.base }
         val note = Label(
             when {
                 g.type == GameDir.Type.EMPTY -> g.type.label
-                materialCount > 0 -> "${g.type.label} · ${visible.size} 个版本 · $materialCount 个原版材料"
-                else -> "${g.type.label} · ${visible.size} 个版本"
+                materialCount == 0 -> "${g.type.label} · ${g.versions.size} 个版本"
+                showBase -> "${g.type.label} · ${g.versions.size} 个版本 · $materialCount 个原版材料"
+                else -> "${g.type.label} · ${visible.size} 个版本 · $materialCount 个原版材料"
             }
         ).apply { style = "-fx-font-size: 12px; -fx-text-fill: #9a9aa0;" }
         val header = HBox(10.0, nameBox, note, pinButton(g), folderButton(g)).apply { alignment = Pos.CENTER_LEFT }
