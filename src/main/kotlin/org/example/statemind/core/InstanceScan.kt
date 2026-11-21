@@ -30,7 +30,15 @@ object InstanceScan {
         val loader: Loader,
         val mcVersion: String,
         /** 上次下载没走完（见 [InstallMarker]）。界面不该把它当成能启动的版本。 */
-        val incomplete: Boolean = false
+        val incomplete: Boolean = false,
+        /**
+         * 这份是别的版本的原材料：同目录里有版本 `inheritsFrom` 它。
+         *
+         * 装加载器时原版的 json 与 client.jar 会被写成一份独立目录，加载器版本靠继承指回来。
+         * 它不是一个「玩家装的版本」，列在界面里只会让人误点、误装 mod、误删。
+         * 只装原版而没有任何加载器时，没有任何版本继承它，它照常显示。
+         */
+        val base: Boolean = false
     ) {
         /** 卡片第二行。 */
         val description: String get() = "${loader.label} · $mcVersion"
@@ -79,24 +87,30 @@ object InstanceScan {
     /** 目录不存在、没有 `versions/`、一个版本都没有 → 返回空表。 */
     fun scan(gameDir: File): List<Version> {
         val dirs = File(gameDir, "versions").listFiles { f -> f.isDirectory } ?: return emptyList()
-        val out = ArrayList<Version>(dirs.size)
-        for (dir in dirs) {
+
+        // 先全读一遍：判断「谁是原材料」要看别的版本的 inheritsFrom，单遍扫不出来。
+        val parsed = dirs.mapNotNull { dir ->
             val id = dir.name
             val json = File(dir, "$id.json")
-            if (!json.isFile) continue          // 没有 json 的文件夹不是版本
-
-            val root = runCatching { MiniJson.parse(json.readText()) as? Map<*, *> }.getOrNull()
-            out.add(
-                Version(
-                    id = id,
-                    dir = dir,
-                    loader = loaderOf(root),
-                    mcVersion = mcVersionOf(root, id),
-                    incomplete = InstallMarker.isIncomplete(dir)
-                )
-            )
+            if (!json.isFile) return@mapNotNull null   // 没有 json 的文件夹不是版本
+            val root = runCatching { MiniJson.parse(json.readText(Charsets.UTF_8)) as? Map<*, *> }
+                .getOrNull()
+            dir to root
         }
-        return out.sortedWith(BY_NEWEST)
+        val materials = parsed.mapNotNullTo(HashSet()) { (_, root) ->
+            (root?.get("inheritsFrom") as? String)?.takeIf { it.isNotBlank() }
+        }
+
+        return parsed.map { (dir, root) ->
+            Version(
+                id = dir.name,
+                dir = dir,
+                loader = loaderOf(root),
+                mcVersion = mcVersionOf(root, dir.name),
+                incomplete = InstallMarker.isIncomplete(dir),
+                base = dir.name in materials
+            )
+        }.sortedWith(BY_NEWEST)
     }
 
     /**
