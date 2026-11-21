@@ -29,4 +29,16 @@ class PageHost(private val pages: List<Page>) : StackPane() {
         page.onEnter()
         onPageChanged?.invoke(id)
     }
+
+    /**
+     * 让当前页重新走一遍 onLeave / onEnter。
+     *
+     * [open] 在「已经停在这一页」时直接返回，所以外层容器切回来时（顶级导航切走再切回
+     * 「设置」），子页收不到 onEnter，界面会停在离开时那份数据上。这里给它一条明确的路；
+     * 界面上的刷新按钮也走这里。
+     */
+    fun refreshCurrent() {
+        current?.onLeave()
+        current?.onEnter()
+    }
 }
