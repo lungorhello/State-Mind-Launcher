@@ -68,6 +68,8 @@ object Dialogs {
      * 确认框，点确定才走 [onConfirm]。
      *
      * [extra] 挂附加控件（如「不再提醒」勾选框），在 [onConfirm] 里自己读状态。
+     * [extraAction] 是第二个选项（如「删除版本」），排在取消与确定之间 —— 它和 [onConfirm]
+     * 是并列的选择，不是「确认前要不要勾上」。
      * [confirmDisabledWhen] 传布尔绑定把「确定」按住：表单没填对就禁用，绝不「关掉弹窗再弹提示」丢输入。
      */
     fun confirm(
@@ -79,11 +81,12 @@ object Dialogs {
         extra: Node? = null,
         contentHeight: Double = CONTENT_HEIGHT,
         confirmDisabledWhen: ObservableValue<Boolean>? = null,
+        extraAction: Pair<String, () -> Unit>? = null,
         onConfirm: () -> Unit
     ) {
         present(
             kind, title, body, extra, confirmText, cancelText,
-            confirmDisabledWhen, contentHeight, onConfirm
+            confirmDisabledWhen, contentHeight, extraAction, onConfirm
         )
     }
 
@@ -118,6 +121,7 @@ object Dialogs {
         cancelText: String?,
         confirmDisabledWhen: ObservableValue<Boolean>?,
         contentHeight: Double = CONTENT_HEIGHT,
+        extraAction: Pair<String, () -> Unit>? = null,
         onConfirm: () -> Unit
     ) {
         val host = layer
@@ -160,6 +164,15 @@ object Dialogs {
             buttons.children += Button(text).apply {
                 style = BTN_CANCEL
                 setOnAction { close() }
+            }
+        }
+        extraAction?.let { (label, action) ->
+            buttons.children += Button(label).apply {
+                style = BTN_CANCEL
+                setOnAction {
+                    close()
+                    action()
+                }
             }
         }
         val ok = Button(confirmText).apply {
