@@ -227,7 +227,8 @@ class SettingInstancePage : Page {
 
     /** 一张版本卡片：左边图标，右边版本名 + 描述，最右边删除。 */
     private fun versionCard(v: InstanceScan.Version): HBox {
-        val name = Label(v.id).apply {
+        // 材料目录叫 `26.3-resources`，卡片上写「26.3 原版材料」更像人话
+        val name = Label(if (v.base) "${v.mcVersion} 原版材料" else v.id).apply {
             style = "-fx-font-size: 13px; -fx-text-fill: #1f1f22;"
             maxWidth = Double.MAX_VALUE
             prefWidth = 0.0        // 同组标题的路径：长版本名不能把「一行两个」那一行撑爆
