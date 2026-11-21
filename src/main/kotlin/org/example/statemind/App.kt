@@ -25,6 +25,7 @@ import org.example.statemind.core.GameDir
 import org.example.statemind.core.GameDirStore
 import org.example.statemind.core.InstanceScan
 import org.example.statemind.core.LaunchSelection
+import org.example.statemind.core.Prefs
 import org.example.statemind.core.LaunchTarget
 import org.example.statemind.core.RecycleBin
 import org.example.statemind.ui.Dialogs
@@ -545,17 +546,23 @@ class App : Application() {
      *
      * 下载没走完的版本不进这个列表：它的 json 已经落盘，但资源还缺，点了也起不来。
      * 实例页仍然看得到它（带「未完成」标记），那里是管理界面，不是启动入口。
+     *
+     * 被继承的原版材料默认也不进：它不是玩家装的版本，落在列表第一个就会被当成默认启动项，
+     * 装 mod 也会落到那份共享目录里。设置里打开「显示共享原版文件」后，它**排在最后** ——
+     * 想玩纯原版可以选，但永远轮不到它当默认。
      */
     private fun choicesOf(dirs: List<InstanceScan.Directory>): List<Choice> {
-        // 不完整的不列；被别的版本继承的原版材料也不列 —— 它不是玩家装的版本，
-        // 选它启动等于绕过加载器，装 mod 也会落到那份共享目录里。
-        val flat = dirs.flatMap { d -> d.versions.filterNot { it.incomplete || it.base }.map { d to it } }
+        val all = dirs.flatMap { d -> d.versions.filterNot { it.incomplete }.map { d to it } }
+        val shown = if (Prefs.showBaseVersions) all else all.filterNot { it.second.base }
+        // 原版材料排在最后：`value = choices.first()` 那条默认选中就永远落不到它头上
+        val flat = shown.filterNot { it.second.base } + shown.filter { it.second.base }
         val repeated = flat.groupingBy { it.second.id }.eachCount().filterValues { it > 1 }.keys
         return flat.map { (d, v) ->
             val name = displayName(v)
+            val remark = if (v.base) "（原版材料）" else ""
             Choice(
                 target = LaunchTarget(v.id, d.gameDir, d.sharedRoot, d.sourceName),
-                label = if (v.id in repeated) "$name　（${d.title}）" else name
+                label = if (v.id in repeated) "$name$remark　（${d.title}）" else "$name$remark"
             )
         }
     }
