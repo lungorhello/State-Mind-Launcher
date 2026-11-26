@@ -16,6 +16,10 @@ object LaunchUtil {
         val javaHome: String,       // Java 目录（BackendUtil.JavaInfo.path），或直接给 java.exe 路径
         val playerName: String,     // 玩家名：离线 = 账号名，第三方 = 皮肤站上的角色名
         val maxMemoryMb: Int = 4096,
+        /** GC 方案；Java 版本够不着时 [GcPreset.args] 自己会返回空表。 */
+        val gc: GcPreset = GcPreset.DEFAULT,
+        /** 这次用的 Java 主版本号（21、8…）；0 = 不知道，按「别乱加参数」处理。 */
+        val javaMajor: Int = 0,
         /** 角色 UUID（第三方账号用皮肤站给的那个）；null 表示按离线算法算。 */
         val uuid: String? = null,
         /** 访问令牌：离线填 "0"，第三方填皮肤站发的 accessToken。 */
@@ -151,6 +155,7 @@ object LaunchUtil {
         val cmd = buildList {
             add(resolveJavaExe(cfg.javaHome))
             add("-Xmx${cfg.maxMemoryMb}M")
+            addAll(cfg.gc.args(cfg.javaMajor))
             add("-Dfile.encoding=UTF-8")
             addAll(cfg.extraJvmArgs)   // 外置登录的 -javaagent 等，必须在主类之前
             addAll(jvmArgs)
