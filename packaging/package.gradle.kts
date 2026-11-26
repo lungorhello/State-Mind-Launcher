@@ -23,13 +23,13 @@ val distAppName = "State Mind Launcher"
  * `x.y.z` 三段或 `x.y.z.b` 四段都行（实测四段 jpackage + WiX 5 接受并原样保留）。
  * 与 build.gradle.kts 里的 `version` 无关：那个只是 Gradle 内部版本，这个才是发布号。
  */
-val distAppVersion = "0.3.3.2"
+val distAppVersion = "0.3.4.0"
 
 /**
  * 给人看的版本号。可以有 `-pre1` 这类后缀 —— 它**不进 MSI**（MSI 装不下），
  * 只用在 ZIP 文件名和便携版说明里，所以预发布版也能一眼看出是哪个。
  */
-val distDisplayVersion = "0.3.3.2"
+val distDisplayVersion = "0.3.4.0-pre1"
 
 val distMainClass = "org.example.statemind.MainKt"
 
@@ -89,6 +89,9 @@ val distCommonArgs: Provider<List<String>> =
             "--input", dir.asFile.absolutePath,
             "--main-jar", jarName,
             "--main-class", distMainClass,
+            // 读物理内存用 com.sun.management.OperatingSystemMXBean，它属于 jdk.management ——
+            // jdeps 按 classpath 分析常常漏掉这个模块，打出来的便携版就会读不到内存总量。
+            "--add-modules", "jdk.management",
             "--java-options", "--enable-native-access=ALL-UNNAMED"
         )
     }
@@ -147,9 +150,10 @@ tasks.register<Zip>("packagePortableZip") {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  安装版（MSI）
+//  安装版（MSI）—— 已停用，只留任务备查
 //
-//  前置：WiX 5（dotnet tool 装的）+ Util/UI 两个扩展。
+//  发布只出便携 ZIP，`packageDist` 不再挂这个任务，别往回调。
+//  前置（真要用时）：WiX 5（dotnet tool 装的）+ Util/UI 两个扩展。
 //  自定义的 wix/main.wxs 会覆盖 jpackage 默认模板，给卸载流程插一个
 //  「是否同时删除游戏数据」的勾选框。
 // ═════════════════════════════════════════════════════════════════════════════
@@ -200,6 +204,7 @@ tasks.register<Exec>("packageMsi") {
 
 tasks.register("packageDist") {
     group = "distribution"
-    description = "一次打出 MSI 安装版 + ZIP 便携版（产物在 build/jpackage/out/）"
-    dependsOn("packageMsi", "packagePortableZip")
+    description = "打便携版 ZIP（产物在 build/jpackage/out/）"
+    // 只出便携版。MSI 那套（WiX + 自定义卸载页）停用，别再挂回这里。
+    dependsOn("packagePortableZip")
 }
