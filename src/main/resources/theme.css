@@ -1,0 +1,26 @@
+/*
+ * 全应用共用的样式微调。AtlantaFX 的主题走 user-agent 样式表，这里是作者样式表，
+ * 优先级更高 —— 只写要改的那几条，别在这里重定义整棵控件树。
+ */
+
+/*
+ * 滑条圆点：主题默认 10px padding（直径 20px），在设置页那些细长的行里显得笨重。
+ * 收到 6px（直径 12px），轨道跟着收，否则圆点比轨道高出一截，看着像没对齐。
+ */
+.slider:horizontal > .thumb {
+    -fx-padding: 6px;
+}
+
+.slider:horizontal > .track {
+    -fx-padding: 6px 0;
+    -fx-background-insets: 0, 3px 0;
+}
+
+/*
+ * 「划过的一段变色」那层（ProgressSliderSkin 加的 .progress）得跟着缩：
+ * 主题是按 20px 高的轨道写死的 6px 内缩，轨道收到 12px 之后那层会被压成零高度。
+ */
+.slider.progress-slider:horizontal > .progress {
+    -fx-background-insets: 0, 3px 0;
+    -fx-background-radius: 3px 0 0 3px;
+}
