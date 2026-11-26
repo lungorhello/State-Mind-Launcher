@@ -32,13 +32,19 @@ object InstanceScan {
         /** 上次下载没走完（见 [InstallMarker]）。界面不该把它当成能启动的版本。 */
         val incomplete: Boolean = false,
         /**
-         * 这份是别的版本的原材料：同目录里有版本 `inheritsFrom` 它。
+         * 这份是共享原版材料（`versions/<版本号>-resources/`）。
          *
-         * 装加载器时原版的 json 与 client.jar 会被写成一份独立目录，加载器版本靠继承指回来。
          * 它不是一个「玩家装的版本」，列在界面里只会让人误点、误装 mod、误删。
-         * 只装原版而没有任何加载器时，没有任何版本继承它，它照常显示。
+         * 身份按目录名认，不看有没有人继承 —— 使用方全删掉之后它也还是材料，不该变成能点的版本。
          */
-        val base: Boolean = false
+        val base: Boolean = false,
+
+        /**
+         * 材料，但没有任何版本继承它（玩家把用它的版本删光了）。
+         *
+         * 这种要摆出来：几十 MB 的白下，再过一会儿连它存在都看不出来。可以删，删了没影响。
+         */
+        val orphan: Boolean = false
     ) {
         /** 卡片第二行。 */
         val description: String get() = "${loader.label} · $mcVersion"
@@ -88,7 +94,7 @@ object InstanceScan {
     fun scan(gameDir: File): List<Version> {
         val dirs = File(gameDir, "versions").listFiles { f -> f.isDirectory } ?: return emptyList()
 
-        // 先全读一遍：判断「谁是原材料」要看别的版本的 inheritsFrom，单遍扫不出来。
+        // 先全读一遍：有没有 json、里面写了什么，决定它是不是版本、算哪个加载器。
         val parsed = dirs.mapNotNull { dir ->
             val id = dir.name
             val json = File(dir, "$id.json")
@@ -97,18 +103,21 @@ object InstanceScan {
                 .getOrNull()
             dir to root
         }
-        val materials = parsed.mapNotNullTo(HashSet()) { (_, root) ->
+
+        val inherited = parsed.mapNotNullTo(HashSet()) { (_, root) ->
             (root?.get("inheritsFrom") as? String)?.takeIf { it.isNotBlank() }
         }
 
         return parsed.map { (dir, root) ->
+            val material = GameDir.SharedVanilla.isMaterial(dir.name)
             Version(
                 id = dir.name,
                 dir = dir,
                 loader = loaderOf(root),
                 mcVersion = mcVersionOf(root, dir.name),
                 incomplete = InstallMarker.isIncomplete(dir),
-                base = dir.name in materials
+                base = material,
+                orphan = material && dir.name !in inherited
             )
         }.sortedWith(BY_NEWEST)
     }
