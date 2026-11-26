@@ -62,17 +62,9 @@ gradlew run
 gradlew packageDist
 ```
 
-产物在 `build/jpackage/out/`：一个 MSI 安装包和一个便携版 ZIP。
+产物在 `build/jpackage/out/`：一个便携版 ZIP。
 
-打 MSI 需要 **WiX 5**：
-
-```
-dotnet tool install --global wix
-wix extension add --global WixToolset.Util.wixext
-wix extension add --global WixToolset.UI.wixext
-```
-
-打包参数（产品名、版本号、UpgradeCode、自定义卸载对话框）集中在 `packaging/` 目录，日常开发用不到。发布版本号改 `packaging/package.gradle.kts` 顶部的 `distAppVersion`。
+打包参数（产品名、版本号）集中在 `packaging/` 目录，日常开发用不到。发布版本号改 `packaging/package.gradle.kts` 顶部的 `distAppVersion`。
 
 ## 目录结构
 
