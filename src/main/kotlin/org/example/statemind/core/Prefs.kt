@@ -37,6 +37,33 @@ object Prefs {
         get() = readFlag(KEY_SHOW_BASE, false)
         set(value) = writeFlag(KEY_SHOW_BASE, value)
 
+    /**
+     * 「设置 · 启动」：内存分配是不是自动。
+     *
+     * 默认自动。以前这个值是写死在 [LaunchUtil.Config] 里的 4096，界面上一个字都看不到，
+     * 装大整合包时只会莫名其妙地卡住或者崩掉。
+     */
+    var memoryAuto: Boolean
+        get() = readFlag(KEY_MEMORY_AUTO, true)
+        set(value) = writeFlag(KEY_MEMORY_AUTO, value)
+
+    /** 自定义分配（MB）。0 = 还没手动调过，切到自定义时从自动值起步。 */
+    var memoryMb: Int
+        get() = props.getProperty(KEY_MEMORY_MB)?.trim()?.toIntOrNull()
+            ?.coerceIn(MachineMemory.MIN_MB, MachineMemory.MAX_MB) ?: 0
+        set(value) {
+            props.setProperty(KEY_MEMORY_MB, value.coerceIn(MachineMemory.MIN_MB, MachineMemory.MAX_MB).toString())
+            save()
+        }
+
+    /** GC 方案。默认不传参数，交给 JVM；两档调优见 [GcPreset]。 */
+    var gc: GcPreset
+        get() = GcPreset.of(props.getProperty(KEY_GC))
+        set(value) {
+            props.setProperty(KEY_GC, value.name)
+            save()
+        }
+
     var javaHome: String
         get() = props.getProperty(KEY_JAVA_HOME).orEmpty()
         set(value) {
@@ -154,6 +181,9 @@ object Prefs {
     private const val KEY_RESOURCE_NAMING = "download.resourceNaming"
     private const val KEY_DOWNLOAD_DIR = "download.dir"
     private const val KEY_SHOW_BASE = "instance.showBase"
+    private const val KEY_MEMORY_AUTO = "launch.memoryAuto"
+    private const val KEY_MEMORY_MB = "launch.memoryMb"
+    private const val KEY_GC = "launch.gc"
 
     /** 「无限制」时的实际线程上限：再高只会把磁盘和网络排队排死。 */
     const val THREADS_MAX = 64
