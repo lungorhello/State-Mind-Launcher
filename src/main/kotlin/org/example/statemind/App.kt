@@ -25,6 +25,8 @@ import org.example.statemind.core.GameDir
 import org.example.statemind.core.GameDirStore
 import org.example.statemind.core.InstanceScan
 import org.example.statemind.core.LaunchSelection
+import org.example.statemind.core.MachineMemory
+import org.example.statemind.core.GcPreset
 import org.example.statemind.core.Prefs
 import org.example.statemind.core.LaunchTarget
 import org.example.statemind.core.RecycleBin
@@ -197,6 +199,8 @@ class App : Application() {
             Color.TRANSPARENT
         )
         WindowChrome.attachResize(root, stage, minWindowWidth, minWindowHeight)
+        // 作者样式表：只放主题改不动的那几条（滑条圆点大小之类），见 resources/theme.css
+        javaClass.getResource("/theme.css")?.let { stage.scene.stylesheets.add(it.toExternalForm()) }
         stage.show()
 
         // 默认停在第一个页面（首页）
@@ -457,6 +461,9 @@ class App : Application() {
                         sharedRoot = target.sharedRoot,
                         javaHome = java.path,
                         playerName = credentials.playerName,
+                        maxMemoryMb = MachineMemory.effectiveMb(),
+                        gc = Prefs.gc,
+                        javaMajor = GcPreset.majorOf(java.version),
                         uuid = credentials.uuid,
                         accessToken = credentials.accessToken,
                         userType = credentials.userType,
@@ -547,7 +554,7 @@ class App : Application() {
      * 下载没走完的版本不进这个列表：它的 json 已经落盘，但资源还缺，点了也起不来。
      * 实例页仍然看得到它（带「未完成」标记），那里是管理界面，不是启动入口。
      *
-     * 被继承的原版材料默认也不进：它不是玩家装的版本，落在列表第一个就会被当成默认启动项，
+     * 共享原版材料默认也不进：它不是玩家装的版本，落在列表第一个就会被当成默认启动项，
      * 装 mod 也会落到那份共享目录里。设置里打开「显示共享原版文件」后，它**排在最后** ——
      * 想玩纯原版可以选，但永远轮不到它当默认。
      */
