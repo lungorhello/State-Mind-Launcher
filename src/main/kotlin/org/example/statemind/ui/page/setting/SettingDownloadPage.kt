@@ -22,6 +22,7 @@ import org.example.statemind.core.ResourceTarget
 import org.example.statemind.core.VersionListSource
 import org.example.statemind.ui.Page
 import org.example.statemind.ui.Typo
+import org.example.statemind.ui.accentTrack
 import org.example.statemind.ui.helpMark
 
 /**
@@ -126,7 +127,7 @@ class SettingDownloadPage : Page {
             maxWidth = Double.MAX_VALUE
             isShowTickMarks = false
             isShowTickLabels = false
-        }
+        }.accentTrack()
         val readout = Label(format(initial)).apply {
             style = Typo.DIM
             minWidth = READOUT_WIDTH
