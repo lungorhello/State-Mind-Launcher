@@ -162,10 +162,11 @@ class SettingInstancePage : Page {
         val nameBox = VBox(2.0, title, path).apply { minWidth = 0.0 }   // 窄窗口里能被压缩，长路径靠省略号
         HBox.setHgrow(nameBox, Priority.ALWAYS)
 
-        // 被别的版本继承的那份（原版材料）默认不摆出来：它不是玩家装的版本，点进去只会绕过加载器。
+        // 有版本在用的共享材料默认不摆出来：它不是玩家装的版本，点进去只会绕过加载器。
+        // 没人继承的那种（玩家把用它的版本删光了）要摆出来，否则几十 MB 悄悄留着、界面上还看不见。
         // 但要留一句数量，否则「明明下了 26.3 却看不见」会像个 bug。要不要列由「设置 · 启动」的开关定。
         val showBase = Prefs.showBaseVersions
-        val visible = if (showBase) g.versions else g.versions.filterNot { it.base }
+        val visible = if (showBase) g.versions else g.versions.filterNot { it.base && !it.orphan }
         val materialCount = g.versions.count { it.base }
         val note = Label(
             when {
@@ -477,8 +478,8 @@ class SettingInstancePage : Page {
      * 只会让「点了没反应」成为最常见的结局 —— 名字对不上时按钮是灰的，连报错都没有。
      */
     private fun askDeleteVersion(v: InstanceScan.Version) {
-        // 被别的版本继承的那份（通常是原版）不能删：它只是「原版材料」，界面上看着像个普通版本，
-        // 一删所有子版本都起不来，而且没人会想到去回收站找还原。
+        // 材料不能在有版本继承它的时候删：界面上它看着像个普通版本，一删所有子版本都起不来，
+        // 而且没人会想到去回收站找还原。
         val dependents = InstanceScan.dependentsOf(v.dir, v.id)
         if (dependents.isNotEmpty()) {
             Dialogs.error(
