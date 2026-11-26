@@ -79,32 +79,26 @@ object GameDir {
      * 共享原版材料的落点：`versions/<版本号>-resources/`。
      *
      * 后缀是给人看的 —— 这份目录里有 json 有 jar，长得跟一个能启动的原版版本一模一样，
-     * 但它只是给加载器版本提供材料，不是玩家装的版本。名字里带上 `-resources` 就不会被误认。
+     * 但它只是给玩家版本提供材料，不是玩家装的版本。名字里带上 `-resources` 就不会被误认。
      *
-     * 老布局 `versions/<版本号>/` 仍然认：那里已经有完整材料时直接沿用（锁定），
-     * 不再按新名字建一份 —— 同一份游戏版本只该有一套共享材料。
+     * 只认这个命名。老布局 `versions/<版本号>/` 里那份完整原版是玩家版本（自己装的原版，
+     * 或者我们早期单下原版留下的），不复用 —— 复用等于让新版本去依赖一个玩家随时会删的目录。
      */
     object SharedVanilla {
 
         const val SUFFIX = "-resources"
 
-        /** [dir] 是材料目录，[id] 是它的文件夹名（老布局时等于版本号本身）。 */
+        /** [dir] 是材料目录，[id] 是它的文件夹名。 */
         data class Shared(val dir: File, val id: String) {
             val json: File get() = File(dir, "$id.json")
             val jar: File get() = File(dir, "$id.jar")
         }
 
-        /** 已有的优先：先看新命名，再看老命名里那份完整的，都没有就按新命名给一个。 */
-        fun of(root: File, mcVersion: String): Shared {
-            val versions = File(root, "versions")
-            val fresh = File(versions, "$mcVersion$SUFFIX")
-            if (fresh.isDirectory) return Shared(fresh, "$mcVersion$SUFFIX")
+        fun of(root: File, mcVersion: String): Shared =
+            Shared(File(root, "versions/$mcVersion$SUFFIX"), "$mcVersion$SUFFIX")
 
-            val legacy = File(versions, mcVersion)
-            if (File(legacy, "$mcVersion.json").isFile) return Shared(legacy, mcVersion)
-
-            return Shared(fresh, "$mcVersion$SUFFIX")
-        }
+        /** 按名字认材料，不看有没有人继承：唯一的使用方删掉之后，它还是材料，不该变成能点的版本。 */
+        fun isMaterial(id: String): Boolean = id.endsWith(SUFFIX)
 
         /** 把 `26.3-resources` 还原成 `26.3`：界面上要显示的是游戏版本，不是材料目录名。 */
         fun stripSuffix(text: String): String =
