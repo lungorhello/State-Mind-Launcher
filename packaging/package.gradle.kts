@@ -89,9 +89,11 @@ val distCommonArgs: Provider<List<String>> =
             "--input", dir.asFile.absolutePath,
             "--main-jar", jarName,
             "--main-class", distMainClass,
-            // 读物理内存用 com.sun.management.OperatingSystemMXBean，它属于 jdk.management ——
-            // jdeps 按 classpath 分析常常漏掉这个模块，打出来的便携版就会读不到内存总量。
-            "--add-modules", "jdk.management",
+            // 读物理内存用 com.sun.management.OperatingSystemMXBean，它在 jdk.management 里，
+            // jdeps 按 classpath 分析会漏掉这个模块。
+            // 给 jdk.management 之外必须带上 ALL-MODULE-PATH：一旦显式写了 --add-modules，
+            // jpackage 就不再按全集链接运行时，出来的包只有这三个模块，JavaFX 当场起不来。
+            "--add-modules", "ALL-MODULE-PATH",
             "--java-options", "--enable-native-access=ALL-UNNAMED"
         )
     }
