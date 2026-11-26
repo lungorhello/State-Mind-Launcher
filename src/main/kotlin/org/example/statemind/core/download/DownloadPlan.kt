@@ -132,8 +132,8 @@ object DownloadPlanner {
      *
      * [targetId] 是这次装出来的版本名（安装页上可以改）。落成几个文件夹看 [GameDir.installShapeOf]：
      * 共享形态下原版的材料落在 `versions/<版本号>-resources/`（见 [GameDir.SharedVanilla]），
-     * 加载器版本靠 `inheritsFrom` 回来找；自包含形态下所有文件都进 `versions/<targetId>/`，
-     * 不另建原版目录。
+     * 原版与加载器版本都只留一层壳靠 `inheritsFrom` 回来找；自包含形态下所有文件都进
+     * `versions/<targetId>/`，不另建原版目录。
      */
     fun plan(
         entry: VersionEntry,
@@ -147,10 +147,9 @@ object DownloadPlanner {
         val versionDir = File(root, "versions/$targetId")
         // 内置目录与 multi 系共享原版，其余传统目录装成自包含（一个文件夹一个完整版本）
         val selfContained = GameDir.installShapeOf(root) == GameDir.InstallShape.SELF_CONTAINED
-        // 只有装加载器才需要共享材料。单下原版时它自己就是一份能玩的版本，再摆一份材料目录
-        // 只会让人分不清哪个该点。
-        // 已有材料就沿用（含老布局 versions/<版本号>/），没有才按 -resources 新命名建。
-        val shared = if (selfContained || loader == null) null else GameDir.SharedVanilla.of(root, entry.id)
+        // 共享形态下原版和加载器都只做薄壳，json 与 client.jar 只在材料目录里存一份。
+        // 单下原版也走这条路：否则同一个版本会被下两遍，玩家自己装的版本还会被当成别人的材料。
+        val shared = if (selfContained) null else GameDir.SharedVanilla.of(root, entry.id)
         val libDir = File(root, "libraries")
         val assetsDir = File(root, "assets")
 
@@ -221,9 +220,15 @@ object DownloadPlanner {
             shared.json.writeText(withId(versionText, shared.id), Charsets.UTF_8)
         }
         if (loader == null) {
-            // 单下原版：官方 json 本身就是全量，换个 id 直接写进自己的目录，jar 也下在这儿
             versionDir.mkdirs()
-            File(versionDir, "$targetId.json").writeText(withId(versionText, targetId), Charsets.UTF_8)
+            val text = if (shared == null) {
+                // 自包含：官方 json 本身就是全量，换个 id 直接写进自己的目录，jar 也下在这儿
+                withId(versionText, targetId)
+            } else {
+                // 共享形态：自己只留一层壳，全量 json 与 jar 都在材料目录里，不再存第二份
+                MiniJson.write(linkedMapOf<String, Any?>("id" to targetId, "inheritsFrom" to shared.id))
+            }
+            File(versionDir, "$targetId.json").writeText(text, Charsets.UTF_8)
         }
 
         // ① 客户端本体
